@@ -63,14 +63,20 @@ with col_left:
 
     st.divider()
 
-    # Scenario predefini OU manuel
-    scenario_choice = st.selectbox(
-        "Scenario predefini",
-        ["-- Manuel --"] + list(predefined_scenarios.keys()),
-    )
+    # Scenario predefini OU manuel — noms lisibles
+    _sc_key_by_label = {}
+    _sc_labels = ["-- Manuel --"]
+    for _k, _v in predefined_scenarios.items():
+        _label = _v.get("name", _k)
+        _sc_labels.append(_label)
+        _sc_key_by_label[_label] = _k
 
-    if scenario_choice != "-- Manuel --" and scenario_choice in predefined_scenarios:
-        preset = predefined_scenarios[scenario_choice]
+    scenario_label = st.selectbox("Scenario predefini", _sc_labels)
+    scenario_key = _sc_key_by_label.get(scenario_label)
+
+    if scenario_key and scenario_key in predefined_scenarios:
+        preset_raw = predefined_scenarios[scenario_key]
+        preset = preset_raw.get("params", preset_raw)  # supporte les 2 formats YAML
         delta_pv = preset.get("delta_pv_gw", 0.0)
         delta_wind_on = preset.get("delta_wind_onshore_gw", 0.0)
         delta_wind_off = preset.get("delta_wind_offshore_gw", 0.0)
@@ -80,7 +86,7 @@ with col_left:
         delta_demand_midday = preset.get("delta_demand_midday_gw", 0.0)
         gas_price = preset.get("gas_price_eur_mwh", 30.0)
         co2_price = preset.get("co2_price_eur_t", 65.0)
-        st.caption(f"Predefini: {preset.get('description', scenario_choice)}")
+        st.caption(f"Predefini : {preset_raw.get('description', scenario_key)}")
     else:
         delta_pv = 0.0
         delta_wind_on = 0.0
@@ -195,7 +201,7 @@ with col_right:
 
     card_cols = st.columns(5)
     with card_cols[0]:
-        _delta_card("H regime A",
+        _delta_card("H regime A (surplus)",
                     baseline_metrics.get("h_regime_a", 0),
                     scenario_metrics.get("h_regime_a", 0), "h", inverse=True,
                     help="Heures de surplus non absorbe. Une baisse = le stockage absorbe mieux.")
@@ -203,22 +209,92 @@ with col_right:
         _delta_card("FAR structural",
                     baseline_metrics.get("far_structural", 0),
                     scenario_metrics.get("far_structural", 0),
-                    help="Capacite d'absorption des surplus. Une hausse = meilleure flexibilite.")
+                    help="Capacite d'absorption des surplus (PSH+BESS+DSM). 1.0 = absorption totale.")
     with card_cols[2]:
-        _delta_card("TCA",
+        _delta_card("Prix moyen meca.",
                     baseline_metrics.get("baseload_price", 0),
                     scenario_metrics.get("baseload_price", 0), "EUR/MWh",
-                    help="Cout d'ancrage thermique. Depend des prix gaz et CO2.")
+                    help="Prix moyen mecaniste (proxy). Baseline = prix observe, Scenario = prix recalcule.")
     with card_cols[3]:
-        _delta_card("TTL mecaniste",
+        _delta_card("TTL (tension)",
                     baseline_metrics.get("ttl", 0),
                     scenario_metrics.get("ttl", 0), "EUR/MWh",
-                    help="Niveau de prix dans les heures de tension.")
+                    help="Prix P95 en heures thermiques (regimes C+D). Indicateur de pointe.")
     with card_cols[4]:
         _delta_card("Capture Ratio PV",
                     baseline_metrics.get("capture_ratio_pv", 0),
                     scenario_metrics.get("capture_ratio_pv", 0),
-                    help="Ratio de prix capte par le solaire. Sous 0.80 = cannibalisation.")
+                    help="Prix capte par le solaire / prix moyen. Sous 0.80 = cannibalisation.")
+
+    # ── Resume narratif dynamique ───────────────────────────────────────
+    _changes = []
+    if scenario_params.get("delta_pv_gw", 0) != 0:
+        _changes.append(f"PV {scenario_params['delta_pv_gw']:+.0f} GW")
+    if scenario_params.get("delta_wind_onshore_gw", 0) != 0:
+        _changes.append(f"Eolien onshore {scenario_params['delta_wind_onshore_gw']:+.0f} GW")
+    if scenario_params.get("delta_wind_offshore_gw", 0) != 0:
+        _changes.append(f"Eolien offshore {scenario_params['delta_wind_offshore_gw']:+.0f} GW")
+    if scenario_params.get("delta_bess_power_gw", 0) != 0:
+        _changes.append(f"BESS {scenario_params['delta_bess_power_gw']:+.0f} GW / {scenario_params.get('delta_bess_energy_gwh', 0):+.0f} GWh")
+    if scenario_params.get("delta_demand_pct", 0) != 0:
+        _changes.append(f"Demande {scenario_params['delta_demand_pct']:+.0f}%")
+    if scenario_params.get("gas_price_eur_mwh", 30) != 30:
+        _changes.append(f"Gaz {scenario_params['gas_price_eur_mwh']:.0f} EUR/MWh")
+    if scenario_params.get("co2_price_eur_t", 65) != 65:
+        _changes.append(f"CO2 {scenario_params['co2_price_eur_t']:.0f} EUR/t")
+
+    _ha_b = baseline_metrics.get("h_regime_a", 0)
+    _ha_s = scenario_metrics.get("h_regime_a", 0)
+    _far_b = baseline_metrics.get("far_structural", 0) or 0
+    _far_s = scenario_metrics.get("far_structural", 0) or 0
+    _cr_b = baseline_metrics.get("capture_ratio_pv", 0) or 0
+    _cr_s = scenario_metrics.get("capture_ratio_pv", 0) or 0
+
+    _summary_parts = []
+    if _changes:
+        _summary_parts.append(f"<strong>Hypotheses :</strong> {', '.join(_changes)}.")
+    if _ha_b != _ha_s:
+        _pct = ((_ha_s - _ha_b) / max(_ha_b, 1)) * 100
+        _summary_parts.append(f"Heures regime A : {_ha_b} &rarr; {_ha_s} ({_pct:+.0f}%).")
+    if _far_b != _far_s:
+        _summary_parts.append(f"FAR structural : {_far_b:.2f} &rarr; {_far_s:.2f} ({_far_s - _far_b:+.2f}).")
+    if _cr_b != _cr_s:
+        _direction = "cannibalisation accrue" if _cr_s < _cr_b else "amelioration"
+        _summary_parts.append(f"Capture ratio PV : {_cr_b:.2f} &rarr; {_cr_s:.2f} ({_direction}).")
+
+    if _summary_parts:
+        dynamic_narrative(" ".join(_summary_parts), "info")
+
+    # ── Tableau comparatif Baseline vs Scenario ─────────────────────────
+    _compare_keys = [
+        ("H regime A (surplus)", "h_regime_a", "h", True),
+        ("H regime B (absorbe)", "h_regime_b", "h", False),
+        ("H regime C (thermique)", "h_regime_c", "h", False),
+        ("H regime D (tension)", "h_regime_d_tail", "h", False),
+        ("H prix negatifs", "h_negative", "h", True),
+        ("FAR structural", "far_structural", "", False),
+        ("Capture Ratio PV", "capture_ratio_pv", "", False),
+        ("Capture Ratio Wind", "capture_ratio_wind", "", False),
+        ("Prix moyen", "baseload_price", "EUR/MWh", False),
+        ("TTL", "ttl", "EUR/MWh", False),
+        ("Surplus (TWh)", "total_surplus_twh", "TWh", True),
+    ]
+    _rows_cmp = []
+    for _lbl, _key, _unit, _inv in _compare_keys:
+        _bv = baseline_metrics.get(_key)
+        _sv = scenario_metrics.get(_key)
+        if _bv is None or (isinstance(_bv, float) and np.isnan(_bv)):
+            _bv = 0
+        if _sv is None or (isinstance(_sv, float) and np.isnan(_sv)):
+            _sv = 0
+        _rows_cmp.append({
+            "Metrique": _lbl,
+            "Baseline": round(_bv, 2),
+            "Scenario": round(_sv, 2),
+            "Delta": round(_sv - _bv, 2),
+        })
+    with st.expander("Tableau comparatif detaille", expanded=False):
+        st.dataframe(pd.DataFrame(_rows_cmp), use_container_width=True, hide_index=True)
 
     st.divider()
 
