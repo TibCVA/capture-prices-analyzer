@@ -117,9 +117,14 @@ def apply_scenario(baseline_df: pd.DataFrame,
         df[COL_MUST_RUN] = np.maximum(0, df[COL_MUST_RUN] + p['delta_must_run_gw'] * 1000)
 
     # --- 4. Recalcul VRE + NRL + Surplus ---
+    vre_before = df[COL_VRE].copy()
     df[COL_VRE] = df[COL_SOLAR].fillna(0) + df[COL_WIND_ON].fillna(0) + df[COL_WIND_OFF].fillna(0)
     df[COL_NRL] = df[COL_LOAD] - df[COL_VRE] - df[COL_MUST_RUN]
     df[COL_SURPLUS] = np.maximum(0.0, -df[COL_NRL])
+
+    # Mettre a jour total_generation pour refleter le delta VRE
+    if COL_TOTAL_GEN in df.columns:
+        df[COL_TOTAL_GEN] = df[COL_TOTAL_GEN] + (df[COL_VRE] - vre_before)
 
     # --- 5. Modifications flex ---
     cap = country_config['flex']['capacity']
@@ -139,7 +144,11 @@ def apply_scenario(baseline_df: pd.DataFrame,
 
     df[COL_FLEX_DOMESTIC] = flex_domestic
     df[COL_FLEX_CAPACITY] = flex_total
-    df[COL_SURPLUS_UNABS] = np.maximum(0.0, df[COL_SURPLUS] - flex_total - bess_absorption)
+
+    # Surplus non absorbe : PSH + DSM + exports (cap instantane) + BESS (SoC simule)
+    # NB: BESS est gere separement via bess_absorption, ne pas le compter dans flex_non_bess
+    flex_non_bess = psh_mw + dsm_mw + export_max_mw
+    df[COL_SURPLUS_UNABS] = np.maximum(0.0, df[COL_SURPLUS] - flex_non_bess - bess_absorption)
 
     # --- 6. TCA scenario + prix mecaniste ---
     tech = country_config['thermal']['marginal_tech']
@@ -189,6 +198,9 @@ def apply_scenario(baseline_df: pd.DataFrame,
         ).clip(upper=tca_scenario * 3)
 
     df['price_mechanistic'] = price_mech
+    # Remplacer les prix DA par les prix mecanistes pour que compute_annual_metrics
+    # calcule les metriques de prix (baseload, capture rates, TTL) sur le scenario
+    df[COL_PRICE_DA] = price_mech
 
     # --- 7. Reclassification regimes ---
     df[COL_REGIME] = 'C'

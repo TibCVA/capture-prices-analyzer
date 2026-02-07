@@ -184,49 +184,17 @@ with col_right:
         scenario_metrics = compute_annual_metrics(scenario_df, baseline_year, baseline_country,
                                                    constants_override=hyp_override)
 
-    # ── 5 delta metric cards ──────────────────────────────────────────────
-    st.subheader("Impact du scenario")
+    # ── Helper ──────────────────────────────────────────────────────────
+    def _safe(val):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return 0
+        return val
 
-    def _delta_card(label: str, baseline_val, scenario_val, unit: str = "",
-                    inverse: bool = False, help: str = ""):
-        """Affiche une metrique avec delta colore."""
-        if baseline_val is None or (isinstance(baseline_val, float) and np.isnan(baseline_val)):
-            baseline_val = 0
-        if scenario_val is None or (isinstance(scenario_val, float) and np.isnan(scenario_val)):
-            scenario_val = 0
-        delta = scenario_val - baseline_val
-        direction = "inverse" if inverse else "normal"
-        st.metric(label, f"{scenario_val:.2f} {unit}", f"{delta:+.2f} {unit}",
-                  delta_color=direction, help=help)
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 1 : Resume narratif (toujours visible en premier)
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader("Resultats du scenario")
 
-    card_cols = st.columns(5)
-    with card_cols[0]:
-        _delta_card("H regime A (surplus)",
-                    baseline_metrics.get("h_regime_a", 0),
-                    scenario_metrics.get("h_regime_a", 0), "h", inverse=True,
-                    help="Heures de surplus non absorbe. Une baisse = le stockage absorbe mieux.")
-    with card_cols[1]:
-        _delta_card("FAR structural",
-                    baseline_metrics.get("far_structural", 0),
-                    scenario_metrics.get("far_structural", 0),
-                    help="Capacite d'absorption des surplus (PSH+BESS+DSM). 1.0 = absorption totale.")
-    with card_cols[2]:
-        _delta_card("Prix moyen meca.",
-                    baseline_metrics.get("baseload_price", 0),
-                    scenario_metrics.get("baseload_price", 0), "EUR/MWh",
-                    help="Prix moyen mecaniste (proxy). Baseline = prix observe, Scenario = prix recalcule.")
-    with card_cols[3]:
-        _delta_card("TTL (tension)",
-                    baseline_metrics.get("ttl", 0),
-                    scenario_metrics.get("ttl", 0), "EUR/MWh",
-                    help="Prix P95 en heures thermiques (regimes C+D). Indicateur de pointe.")
-    with card_cols[4]:
-        _delta_card("Capture Ratio PV",
-                    baseline_metrics.get("capture_ratio_pv", 0),
-                    scenario_metrics.get("capture_ratio_pv", 0),
-                    help="Prix capte par le solaire / prix moyen. Sous 0.80 = cannibalisation.")
-
-    # ── Resume narratif dynamique ───────────────────────────────────────
     _changes = []
     if scenario_params.get("delta_pv_gw", 0) != 0:
         _changes.append(f"PV {scenario_params['delta_pv_gw']:+.0f} GW")
@@ -238,122 +206,165 @@ with col_right:
         _changes.append(f"BESS {scenario_params['delta_bess_power_gw']:+.0f} GW / {scenario_params.get('delta_bess_energy_gwh', 0):+.0f} GWh")
     if scenario_params.get("delta_demand_pct", 0) != 0:
         _changes.append(f"Demande {scenario_params['delta_demand_pct']:+.0f}%")
+    if scenario_params.get("delta_demand_midday_gw", 0) != 0:
+        _changes.append(f"Demande midday {scenario_params['delta_demand_midday_gw']:+.0f} GW")
     if scenario_params.get("gas_price_eur_mwh", 30) != 30:
         _changes.append(f"Gaz {scenario_params['gas_price_eur_mwh']:.0f} EUR/MWh")
     if scenario_params.get("co2_price_eur_t", 65) != 65:
         _changes.append(f"CO2 {scenario_params['co2_price_eur_t']:.0f} EUR/t")
 
-    _ha_b = baseline_metrics.get("h_regime_a", 0)
-    _ha_s = scenario_metrics.get("h_regime_a", 0)
-    _far_b = baseline_metrics.get("far_structural", 0) or 0
-    _far_s = scenario_metrics.get("far_structural", 0) or 0
-    _cr_b = baseline_metrics.get("capture_ratio_pv", 0) or 0
-    _cr_s = scenario_metrics.get("capture_ratio_pv", 0) or 0
-
-    _summary_parts = []
     if _changes:
-        _summary_parts.append(f"<strong>Hypotheses :</strong> {', '.join(_changes)}.")
+        st.markdown(f"**Hypotheses** : {', '.join(_changes)}")
+
+    _ha_b = _safe(baseline_metrics.get("h_regime_a", 0))
+    _ha_s = _safe(scenario_metrics.get("h_regime_a", 0))
+    _far_b = _safe(baseline_metrics.get("far_structural", 0))
+    _far_s = _safe(scenario_metrics.get("far_structural", 0))
+    _cr_b = _safe(baseline_metrics.get("capture_ratio_pv", 0))
+    _cr_s = _safe(scenario_metrics.get("capture_ratio_pv", 0))
+
+    _narrative_parts = []
     if _ha_b != _ha_s:
         _pct = ((_ha_s - _ha_b) / max(_ha_b, 1)) * 100
-        _summary_parts.append(f"Heures regime A : {_ha_b} &rarr; {_ha_s} ({_pct:+.0f}%).")
+        _emoji = "baisse" if _ha_s < _ha_b else "hausse"
+        _narrative_parts.append(f"Heures de surplus (regime A) : {_ha_b} &rarr; {_ha_s} h ({_pct:+.0f}%, {_emoji})")
     if _far_b != _far_s:
-        _summary_parts.append(f"FAR structural : {_far_b:.2f} &rarr; {_far_s:.2f} ({_far_s - _far_b:+.2f}).")
+        _narrative_parts.append(f"FAR structural : {_far_b:.2f} &rarr; {_far_s:.2f} ({_far_s - _far_b:+.2f})")
     if _cr_b != _cr_s:
         _direction = "cannibalisation accrue" if _cr_s < _cr_b else "amelioration"
-        _summary_parts.append(f"Capture ratio PV : {_cr_b:.2f} &rarr; {_cr_s:.2f} ({_direction}).")
+        _narrative_parts.append(f"Capture ratio PV : {_cr_b:.2f} &rarr; {_cr_s:.2f} ({_direction})")
 
-    if _summary_parts:
-        dynamic_narrative(" ".join(_summary_parts), "info")
+    if _narrative_parts:
+        dynamic_narrative("<br>".join(_narrative_parts), "info")
 
-    # ── Tableau comparatif Baseline vs Scenario ─────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 2 : Metriques delta — 2 lignes de 3 cartes
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown("#### Metriques cles")
+
+    def _delta_card(label, bkey, unit="", fmt=".2f", inverse=False, help_txt=""):
+        bv = _safe(baseline_metrics.get(bkey, 0))
+        sv = _safe(scenario_metrics.get(bkey, 0))
+        delta = sv - bv
+        st.metric(label, f"{sv:{fmt}} {unit}", f"{delta:+{fmt}} {unit}",
+                  delta_color="inverse" if inverse else "normal", help=help_txt)
+
+    row1 = st.columns(3)
+    with row1[0]:
+        _delta_card("H regime A (surplus)", "h_regime_a", "h", ".0f", inverse=True,
+                    help_txt="Heures ou le surplus VRE depasse toute la flexibilite. Baisse = mieux.")
+    with row1[1]:
+        _delta_card("FAR structural", "far_structural", "", ".3f",
+                    help_txt="Part du surplus absorbable par flex domestique (PSH+BESS+DSM). 1.0 = total.")
+    with row1[2]:
+        _delta_card("H prix negatifs", "h_negative", "h", ".0f", inverse=True,
+                    help_txt="Heures ou le prix tombe sous 0 EUR/MWh.")
+
+    row2 = st.columns(3)
+    with row2[0]:
+        _delta_card("Prix moyen (meca.)", "baseload_price", "EUR/MWh",
+                    help_txt="Prix moyen mecaniste. Baseline = observe, Scenario = recalcule.")
+    with row2[1]:
+        _delta_card("Capture Ratio PV", "capture_ratio_pv", "", ".3f",
+                    help_txt="Prix capte par le solaire / prix moyen. Sous 0.80 = cannibalisation.")
+    with row2[2]:
+        _delta_card("Surplus (TWh)", "total_surplus_twh", "TWh", ".2f", inverse=True,
+                    help_txt="Volume total de surplus VRE sur l'annee.")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 3 : Tableau comparatif complet
+    # ══════════════════════════════════════════════════════════════════════
     _compare_keys = [
-        ("H regime A (surplus)", "h_regime_a", "h", True),
-        ("H regime B (absorbe)", "h_regime_b", "h", False),
-        ("H regime C (thermique)", "h_regime_c", "h", False),
-        ("H regime D (tension)", "h_regime_d_tail", "h", False),
-        ("H prix negatifs", "h_negative", "h", True),
-        ("FAR structural", "far_structural", "", False),
-        ("Capture Ratio PV", "capture_ratio_pv", "", False),
-        ("Capture Ratio Wind", "capture_ratio_wind", "", False),
-        ("Prix moyen", "baseload_price", "EUR/MWh", False),
-        ("TTL", "ttl", "EUR/MWh", False),
-        ("Surplus (TWh)", "total_surplus_twh", "TWh", True),
+        ("H regime A (surplus)", "h_regime_a"),
+        ("H regime B (absorbe)", "h_regime_b"),
+        ("H regime C (thermique)", "h_regime_c"),
+        ("H regime D (tension)", "h_regime_d_tail"),
+        ("H prix negatifs", "h_negative"),
+        ("FAR structural", "far_structural"),
+        ("Capture Ratio PV", "capture_ratio_pv"),
+        ("Capture Ratio Wind", "capture_ratio_wind"),
+        ("Prix moyen (EUR/MWh)", "baseload_price"),
+        ("TTL (EUR/MWh)", "ttl"),
+        ("Surplus (TWh)", "total_surplus_twh"),
+        ("VRE share (%)", "vre_share"),
     ]
     _rows_cmp = []
-    for _lbl, _key, _unit, _inv in _compare_keys:
-        _bv = baseline_metrics.get(_key)
-        _sv = scenario_metrics.get(_key)
-        if _bv is None or (isinstance(_bv, float) and np.isnan(_bv)):
-            _bv = 0
-        if _sv is None or (isinstance(_sv, float) and np.isnan(_sv)):
-            _sv = 0
+    for _lbl, _key in _compare_keys:
+        _bv = _safe(baseline_metrics.get(_key))
+        _sv = _safe(scenario_metrics.get(_key))
         _rows_cmp.append({
             "Metrique": _lbl,
-            "Baseline": round(_bv, 2),
-            "Scenario": round(_sv, 2),
-            "Delta": round(_sv - _bv, 2),
+            "Baseline": round(_bv, 3),
+            "Scenario": round(_sv, 3),
+            "Delta": round(_sv - _bv, 3),
         })
-    with st.expander("Tableau comparatif detaille", expanded=False):
+    with st.expander("Tableau comparatif complet (12 metriques)", expanded=False):
         st.dataframe(pd.DataFrame(_rows_cmp), use_container_width=True, hide_index=True)
 
     st.divider()
 
-    # ── Grouped bars : regimes baseline vs scenario ───────────────────────
-    st.subheader("Repartition des regimes")
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 4 : Graphiques cote a cote
+    # ══════════════════════════════════════════════════════════════════════
+    chart_left, chart_right = st.columns(2)
 
-    regimes = ["A", "B", "C", "D_tail"]
-    regime_keys = ["h_regime_a", "h_regime_b", "h_regime_c", "h_regime_d_tail"]
-    baseline_hours = [baseline_metrics.get(k, 0) for k in regime_keys]
-    scenario_hours = [scenario_metrics.get(k, 0) for k in regime_keys]
+    # --- Barres groupees : regimes ---
+    with chart_left:
+        st.markdown("#### Repartition des regimes")
+        regimes = ["A (surplus)", "B (absorbe)", "C (thermique)", "D (tension)"]
+        regime_keys = ["h_regime_a", "h_regime_b", "h_regime_c", "h_regime_d_tail"]
+        baseline_hours = [baseline_metrics.get(k, 0) for k in regime_keys]
+        scenario_hours = [scenario_metrics.get(k, 0) for k in regime_keys]
 
-    fig_regimes = go.Figure()
-    fig_regimes.add_trace(go.Bar(
-        name="Baseline", x=regimes, y=baseline_hours,
-        marker_color="#636EFA", opacity=0.7,
-    ))
-    fig_regimes.add_trace(go.Bar(
-        name="Scenario", x=regimes, y=scenario_hours,
-        marker_color="#EF553B", opacity=0.7,
-    ))
-    fig_regimes.update_layout(
-        **PLOTLY_LAYOUT_DEFAULTS,
-        barmode="group", height=380,
-        yaxis_title="Heures",
-        title="Heures par regime : Baseline vs Scenario",
-    )
-    st.plotly_chart(fig_regimes, use_container_width=True)
+        fig_regimes = go.Figure()
+        fig_regimes.add_trace(go.Bar(
+            name="Baseline", x=regimes, y=baseline_hours,
+            marker_color="#636EFA", opacity=0.7,
+        ))
+        fig_regimes.add_trace(go.Bar(
+            name="Scenario", x=regimes, y=scenario_hours,
+            marker_color="#EF553B", opacity=0.7,
+        ))
+        fig_regimes.update_layout(
+            **PLOTLY_LAYOUT_DEFAULTS,
+            barmode="group", height=380,
+            yaxis_title="Heures",
+            margin=dict(l=40, r=10, t=30, b=50),
+        )
+        st.plotly_chart(fig_regimes, use_container_width=True)
 
-    # ── NRL Duration Curve ────────────────────────────────────────────────
-    st.subheader("Courbe de duree NRL")
+    # --- Courbe de duree NRL ---
+    with chart_right:
+        st.markdown("#### Courbe de duree NRL")
+        nrl_baseline = baseline_df[COL_NRL].sort_values(ascending=False).reset_index(drop=True)
+        nrl_scenario = scenario_df[COL_NRL].sort_values(ascending=False).reset_index(drop=True)
 
-    nrl_baseline = baseline_df[COL_NRL].sort_values(ascending=False).reset_index(drop=True)
-    nrl_scenario = scenario_df[COL_NRL].sort_values(ascending=False).reset_index(drop=True)
-
-    fig_nrl = go.Figure()
-    fig_nrl.add_trace(go.Scatter(
-        x=list(range(len(nrl_baseline))), y=nrl_baseline,
-        mode="lines", name="Baseline",
-        line=dict(color="gray", width=1.5),
-    ))
-    fig_nrl.add_trace(go.Scatter(
-        x=list(range(len(nrl_scenario))), y=nrl_scenario,
-        mode="lines", name="Scenario",
-        line=dict(color="#EF553B", width=2),
-    ))
-    fig_nrl.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
-    fig_nrl.update_layout(
-        **PLOTLY_LAYOUT_DEFAULTS,
-        height=420,
-        xaxis_title="Heures (triees par NRL decroissant)",
-        yaxis_title="NRL (MW)",
-        title="Net Residual Load -- Duration Curve",
-    )
-    st.plotly_chart(fig_nrl, use_container_width=True)
+        fig_nrl = go.Figure()
+        fig_nrl.add_trace(go.Scatter(
+            x=list(range(len(nrl_baseline))), y=nrl_baseline,
+            mode="lines", name="Baseline",
+            line=dict(color="gray", width=1.5),
+        ))
+        fig_nrl.add_trace(go.Scatter(
+            x=list(range(len(nrl_scenario))), y=nrl_scenario,
+            mode="lines", name="Scenario",
+            line=dict(color="#EF553B", width=2),
+        ))
+        fig_nrl.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
+        fig_nrl.update_layout(
+            **PLOTLY_LAYOUT_DEFAULTS,
+            height=380,
+            xaxis_title="Heures triees",
+            yaxis_title="NRL (MW)",
+            margin=dict(l=40, r=10, t=30, b=50),
+        )
+        st.plotly_chart(fig_nrl, use_container_width=True)
 
     # ── Disclaimer ────────────────────────────────────────────────────────
-    st.warning(
-        "**Disclaimer** : Les prix mecanistes sont un proxy simplifie. "
-        "Ils ne modelisent pas le merit order complet. "
+    st.info(
+        "**Note methodologique** : Les prix sont des proxys mecanistes (affine par morceaux), "
+        "pas un merit order complet. Le BESS est simule avec un SoC reset journalier. "
+        "Les interconnexions ne sont pas recalculees. "
         "Utiliser pour detecter des tendances, pas pour du pricing precis.",
-        icon="⚠️"
+        icon="ℹ️"
     )
