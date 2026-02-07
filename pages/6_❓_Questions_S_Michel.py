@@ -329,41 +329,71 @@ with tabs[2]:
                 + "<br>".join(lines),
                 "info")
 
-    # Slider : GW BESS pour atteindre Stage 3
-    st.markdown("#### Estimation BESS pour atteindre Stage 3")
-    bess_target_country = st.selectbox("Pays cible", selected_countries, key="q3_country")
-    bess_slider_gw = st.slider("GW BESS supplementaires", 0.0, 30.0, 5.0, 0.5, key="q3_bess")
+    # ── Analyse des ecarts Stage 3 par pays ──────────────────────────────
+    st.markdown("#### Diagnostic Stage 3 : conditions par pays")
+    st.caption("Les 3 conditions requises pour le Stage 3 (absorption structurelle).")
 
-    latest_key = None
-    for y in sorted({k[1] for k in processed_data.keys()}, reverse=True):
-        if (bess_target_country, y) in processed_data:
-            latest_key = (bess_target_country, y)
-            break
+    gap_rows = []
+    for c in selected_countries:
+        years_for_c = sorted([y for (cc, y) in annual_metrics if cc == c])
+        if not years_for_c:
+            continue
+        latest_y = years_for_c[-1]
+        m = annual_metrics.get((c, latest_y), {})
+        d = diagnostics.get((c, latest_y), {})
 
-    if latest_key:
-        from src.data_loader import load_country_config
-        try:
-            cfg = load_country_config(bess_target_country)
-            test_df = apply_scenario(
-                processed_data[latest_key],
-                {"delta_bess_power_gw": bess_slider_gw,
-                 "delta_bess_energy_gwh": bess_slider_gw * 4},
-                cfg, bess_target_country, latest_key[1], commodity_prices,
-            )
-            from src.metrics import compute_annual_metrics as cam
-            test_metrics = cam(test_df, latest_key[1], bess_target_country)
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                st.metric("FAR structural (scenario)",
-                          f"{test_metrics.get('far_structural', 0):.3f}")
-            with col_b:
-                st.metric("H negatives (scenario)",
-                          f"{test_metrics.get('h_negative', 0)}")
-            with col_c:
-                st.metric("H regime A (scenario)",
-                          f"{test_metrics.get('h_regime_a', 0)}")
-        except Exception as e:
-            st.error(f"Erreur simulation: {e}")
+        vre_pct = m.get("vre_share", 0)
+        sr_val = m.get("sr", 0)
+        far_val = m.get("far_structural", 0) or 0
+        h_neg = m.get("h_negative", 0)
+
+        # Condition inter-annuelle
+        prev_m = annual_metrics.get((c, latest_y - 1))
+        if prev_m:
+            vre_up = vre_pct > prev_m.get("vre_share", 0)
+            h_neg_down = h_neg < prev_m.get("h_negative", 0)
+            interannual_ok = vre_up and h_neg_down
+            interannual_txt = ("VRE " + ("hausse" if vre_up else "baisse")
+                               + " + h_neg " + ("baisse" if h_neg_down else "hausse"))
+        else:
+            interannual_ok = False
+            interannual_txt = "N-1 non disponible"
+
+        ok = "\u2705"
+        ko = "\u274C"
+        gap_rows.append({
+            "Pays": c,
+            "Annee": latest_y,
+            "Phase actuelle": f"Stage {d.get('phase_number', '?')}",
+            f"VRE >= 20%": f"{ok} {vre_pct:.1%}" if vre_pct >= 0.20 else f"{ko} {vre_pct:.1%}",
+            f"SR >= 0.5%": f"{ok} {sr_val:.2%}" if sr_val >= 0.005 else f"{ko} {sr_val:.2%}",
+            f"FAR >= 0.60": f"{ok} {far_val:.2f}" if far_val >= 0.60 else f"{ko} {far_val:.2f}",
+            "Amelioration N/N-1": f"{ok} {interannual_txt}" if interannual_ok else f"{ko} {interannual_txt}",
+        })
+
+    if gap_rows:
+        st.dataframe(pd.DataFrame(gap_rows), use_container_width=True, hide_index=True)
+
+        # Interpretation par pays
+        for row in gap_rows:
+            c = row["Pays"]
+            blockers = []
+            if "\u274C" in row["VRE >= 20%"]:
+                blockers.append("VRE insuffisant (< 20%)")
+            if "\u274C" in row["SR >= 0.5%"]:
+                blockers.append("surplus ratio negligeable — le FAR eleve est trivial (rien a absorber)")
+            if "\u274C" in row["FAR >= 0.60"]:
+                blockers.append("flex domestique insuffisante (PSH + BESS + DSM)")
+            if "\u274C" in row["Amelioration N/N-1"]:
+                blockers.append("pas d'amelioration inter-annuelle (VRE en hausse + h_neg en baisse)")
+            if blockers:
+                dynamic_narrative(
+                    f"<strong>{c}</strong> — bloqueurs Stage 3 : " + " ; ".join(blockers) + ".",
+                    "warning")
+            elif row["Phase actuelle"] == "Stage 3":
+                dynamic_narrative(
+                    f"<strong>{c}</strong> — toutes les conditions Stage 3 sont remplies.",
+                    "success")
 
 # ── Q4 : Impact des batteries ────────────────────────────────────────────
 with tabs[3]:
