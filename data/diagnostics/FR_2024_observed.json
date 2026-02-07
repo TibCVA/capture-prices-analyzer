@@ -1,0 +1,1 @@
+{"phase": "stage_2", "phase_number": 2, "scores": {"stage_1": 0, "stage_2": 10, "stage_3": 0, "stage_4": 0}, "confidence": 1.0, "alerts": [{"key": "high_inflexibility", "label": "\ud83d\udd34 IR \u00e9lev\u00e9", "color": "#f44336"}]}

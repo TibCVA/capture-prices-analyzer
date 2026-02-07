@@ -1,0 +1,20 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Raw data (pas necessaire au deploiement, ~31 MB)
+data/raw/
+
+# Exports (generes par l'utilisateur)
+data/exports/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+
+# NE PAS ignorer data/processed/, data/metrics/, data/diagnostics/, data/external/
+# → commites pour le deploiement (auto-load au demarrage)

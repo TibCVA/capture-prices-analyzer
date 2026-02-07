@@ -1,0 +1,48 @@
+phase_thresholds:
+
+  stage_1:
+    h_negative_max: 100
+    h_below_5_max: 200
+    capture_ratio_pv_min: 0.85
+    sr_max: 0.01
+
+  stage_2:
+    h_negative_min: 200
+    h_negative_strong: 300
+    h_below_5_min: 500
+    capture_ratio_pv_max: 0.80
+    capture_ratio_pv_crisis: 0.70
+    days_spread_50_min: 150
+
+  stage_3:
+    vre_share_min: 0.20          # Minimum VRE pour qualifier en Stage 3
+    sr_min: 0.005                # Minimum surplus ratio — si quasi-nul, FAR est trivial
+    far_structural_min: 0.60
+    far_structural_strong: 0.80
+    require_h_neg_declining: true
+
+  stage_4:
+    vre_share_min: 0.35          # Minimum VRE pour qualifier en Stage 4
+    far_structural_min: 0.90
+    h_regime_c_max: 1500
+
+  alerts:
+    approaching_stage_2:
+      h_negative_range: [150, 300]
+      capture_ratio_pv_range: [0.75, 0.85]
+      label: "⚠️ Approche Stage 2"
+      color: "#ff9800"
+    deep_stage_2:
+      h_negative_min: 500
+      capture_ratio_pv_max: 0.65
+      label: "🔴 Stage 2 sévère"
+      color: "#f44336"
+    high_inflexibility:
+      ir_min: 0.60
+      label: "🔴 IR élevé"
+      color: "#f44336"
+    low_flex:
+      far_structural_max: 0.30
+      sr_min: 0.02
+      label: "🔴 Flex insuffisante"
+      color: "#f44336"
