@@ -52,6 +52,8 @@ _REQUIRED_METRICS_KEYS = {
     "price_used_p95",
 }
 
+_DEFAULT_COUNTRY_SELECTION = ["FR", "DE", "ES", "PL", "DK"]
+
 
 def _init_state() -> None:
     if "state" not in st.session_state:
@@ -61,7 +63,7 @@ def _init_state() -> None:
             "processed": {},
             "metrics": {},
             "diagnostics": {},
-            "countries_selected": ["FR", "DE", "ES"],
+            "countries_selected": _DEFAULT_COUNTRY_SELECTION.copy(),
             "year_range": (2015, 2024),
             "exclude_2022": True,
             "must_run_mode": "observed",
@@ -210,6 +212,14 @@ normalize_state_metrics(state)
 all_countries = sorted([k for k in countries_cfg.keys() if not k.startswith("__")])
 country_labels = {c: countries_cfg[c].get("name", c) for c in all_countries}
 
+# Migration douce: si l'utilisateur est encore sur l'ancien défaut FR/DE/ES,
+# étendre automatiquement à FR/DE/ES/PL/DK tant que les données ne sont pas chargées.
+if (
+    not state.get("data_loaded")
+    and set(state.get("countries_selected", [])) == {"FR", "DE", "ES"}
+):
+    state["countries_selected"] = [c for c in _DEFAULT_COUNTRY_SELECTION if c in all_countries]
+
 with st.sidebar:
     st.markdown("#### Capture Prices Analyzer")
 
@@ -217,7 +227,11 @@ with st.sidebar:
     state["countries_selected"] = st.multiselect(
         "Pays",
         options=all_countries,
-        default=[c for c in state["countries_selected"] if c in all_countries] or all_countries[:3],
+        default=(
+            [c for c in state["countries_selected"] if c in all_countries]
+            or [c for c in _DEFAULT_COUNTRY_SELECTION if c in all_countries]
+            or all_countries[: min(5, len(all_countries))]
+        ),
         format_func=lambda c: f"{c} - {country_labels.get(c, c)}",
     )
 
