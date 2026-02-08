@@ -11,17 +11,7 @@ from dotenv import load_dotenv
 from src.commentary_bridge import comment_kpi, so_what_block
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
 from src.data_fetcher import fetch_country_year
-from src.data_loader import (
-    ensure_raw_minimum_columns,
-    list_processed_keys,
-    load_commodity_prices,
-    load_metrics,
-    load_processed,
-    load_raw,
-    save_diagnostics,
-    save_metrics,
-    save_processed,
-)
+import src.data_loader as _data_loader
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
 from src.phase_diagnostics import diagnose_phase
@@ -29,6 +19,30 @@ from src.state_adapter import metrics_to_dataframe, normalize_metrics_record, no
 from src.ui_helpers import dynamic_narrative, info_card, inject_global_css, narrative, render_commentary, section_header
 
 load_dotenv()
+
+
+def _missing_loader(name: str):
+    def _raise(*_args, **_kwargs):
+        raise ImportError(f"src.data_loader.{name} indisponible dans cette version de deploiement")
+
+    return _raise
+
+
+def _ensure_raw_minimum_columns_fallback(df: pd.DataFrame, _country_key: str, _year: int) -> pd.DataFrame:
+    return df
+
+
+ensure_raw_minimum_columns = getattr(
+    _data_loader, "ensure_raw_minimum_columns", _ensure_raw_minimum_columns_fallback
+)
+list_processed_keys = getattr(_data_loader, "list_processed_keys", lambda **_kwargs: [])
+load_commodity_prices = getattr(_data_loader, "load_commodity_prices", _missing_loader("load_commodity_prices"))
+load_metrics = getattr(_data_loader, "load_metrics", _missing_loader("load_metrics"))
+load_processed = getattr(_data_loader, "load_processed", _missing_loader("load_processed"))
+load_raw = getattr(_data_loader, "load_raw", _missing_loader("load_raw"))
+save_diagnostics = getattr(_data_loader, "save_diagnostics", lambda *_args, **_kwargs: None)
+save_metrics = getattr(_data_loader, "save_metrics", lambda *_args, **_kwargs: None)
+save_processed = getattr(_data_loader, "save_processed", _missing_loader("save_processed"))
 
 st.set_page_config(page_title="Capture Prices Analyzer", page_icon="⚡", layout="wide")
 inject_global_css()
