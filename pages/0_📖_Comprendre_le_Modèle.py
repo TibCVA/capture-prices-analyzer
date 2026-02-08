@@ -10,12 +10,16 @@ import streamlit as st
 
 from src.commentary_bridge import so_what_block
 from src.constants import (
+    COL_BESS_CHARGE,
     COL_FLEX_EFFECTIVE,
     COL_LOAD,
     COL_MUST_RUN,
+    COL_NET_POSITION,
     COL_NRL,
     COL_PRICE_DA,
+    COL_PSH_PUMP,
     COL_REGIME,
+    COL_SINK_NON_BESS,
     COL_SURPLUS,
     COL_SURPLUS_UNABS,
     COL_VRE,
@@ -83,12 +87,29 @@ df = ensure_plot_columns(
         COL_SURPLUS_UNABS,
         COL_REGIME,
         COL_PRICE_DA,
+        COL_SINK_NON_BESS,
+        COL_BESS_CHARGE,
+        COL_NET_POSITION,
+        COL_PSH_PUMP,
     ],
     with_notice=True,
 )
 df = coerce_numeric_columns(
     df,
-    [COL_LOAD, COL_VRE, COL_MUST_RUN, COL_NRL, COL_SURPLUS, COL_FLEX_EFFECTIVE, COL_SURPLUS_UNABS, COL_PRICE_DA],
+    [
+        COL_LOAD,
+        COL_VRE,
+        COL_MUST_RUN,
+        COL_NRL,
+        COL_SURPLUS,
+        COL_FLEX_EFFECTIVE,
+        COL_SURPLUS_UNABS,
+        COL_PRICE_DA,
+        COL_SINK_NON_BESS,
+        COL_BESS_CHARGE,
+        COL_NET_POSITION,
+        COL_PSH_PUMP,
+    ],
 )
 if df.attrs.get("_missing_plot_columns", []):
     st.info("Colonnes completees en NaN pour robustesse: " + ", ".join(df.attrs.get("_missing_plot_columns", [])))
@@ -174,6 +195,49 @@ with st.expander("Etape 4 - De NRL aux regimes A/B/C/D", expanded=True):
     )
     st.dataframe(regime_counts, use_container_width=True, hide_index=True)
     st.caption("Base de calcul: classification strictement physique, sans utiliser le prix (anti-circularite).")
+
+section_header("Point physique critique", "Que signifie exactement 'surplus non absorbe'")
+surplus_total_mwh = float(df[COL_SURPLUS].fillna(0.0).sum())
+absorbed_model_mwh = float(np.minimum(df[COL_SURPLUS].fillna(0.0), df[COL_FLEX_EFFECTIVE].fillna(0.0)).sum())
+unabsorbed_mwh = float(df[COL_SURPLUS_UNABS].fillna(0.0).sum())
+exports_pos_mwh = (
+    float(df[COL_NET_POSITION].fillna(0.0).clip(lower=0.0).sum()) if COL_NET_POSITION in df.columns else float("nan")
+)
+psh_pump_mwh = (
+    float(df[COL_PSH_PUMP].fillna(0.0).clip(lower=0.0).sum()) if COL_PSH_PUMP in df.columns else float("nan")
+)
+render_commentary(
+    so_what_block(
+        title="Interpretation physique sans ambiguite",
+        purpose="Verifier que 'surplus non absorbe' est un residuel de modele, pas une energie qui disparait physiquement.",
+        observed={
+            "surplus_total_twh": surplus_total_mwh * 1e-6,
+            "absorbed_model_twh": absorbed_model_mwh * 1e-6,
+            "surplus_unabsorbed_twh": unabsorbed_mwh * 1e-6,
+            "exports_pos_twh": exports_pos_mwh * 1e-6 if np.isfinite(exports_pos_mwh) else np.nan,
+            "psh_pump_twh": psh_pump_mwh * 1e-6 if np.isfinite(psh_pump_mwh) else np.nan,
+        },
+        method_link=(
+            "Identites du modele: surplus_unabsorbed = max(0, surplus - flex_effective), "
+            "avec flex_effective = sink_non_bess + bess_charge. En mode observed, sink_non_bess "
+            "inclut PSH pumping et net_position>0 (exports)."
+        ),
+        limits=(
+            "Le residuel non absorbe indique une energie qui doit etre geree hors des sinks modelises "
+            "(curtailment, baisse forcee, flexibilites non observees, ajustements infra-horaires)."
+        ),
+        n=len(df),
+        decision_use="Ne pas lire ce residuel comme une violation physique; le lire comme signal de contrainte systeme.",
+    )
+)
+
+if country == "FR":
+    dynamic_text = (
+        "Lecture FR: un surplus non absorbe eleve signifie qu'apres absorption par les sinks modelises "
+        "(exports/PSH/BESS), il reste un reliquat a gerer par d'autres mecanismes non explicites du modele "
+        "(notamment curtailment et ajustements operationnels)."
+    )
+    narrative(dynamic_text)
 
 section_header("Visualisation 48h", "Load, VRE, Must-run, NRL, surplus et flex")
 df48 = df.head(48).copy()
@@ -300,7 +364,7 @@ Le SR est la somme annuelle de ces surplus rapportee a la generation totale.
 | Espagne 2015 | 0.0000 | Surplus quasi-nul. Le PV et l'eolien sont encore marginaux (< 5% de la generation). Le systeme absorbe tout sans difficulte. |
 | Allemagne 2020 | 0.0007 | Surplus faible (0.07% de la generation). Quelques heures de surplus existent (typiquement midi en ete), mais elles restent marginales. |
 | France 2024 | 0.107 | Surplus eleve (10.7% de la generation). Plus d'une heure sur dix produit un excedent. Le nucleaire (must-run rigide) combine au PV cree des surplus frequents. |
-| Danemark 2024 | 0.128 | Surplus tres eleve (12.8%). Le Danemark a ~75% de VRE mais un systeme petit (< 40 GW) avec peu de flex domestique → surplus structurel. |
+| Danemark 2024 | 0.128 | Surplus tres eleve (12.8%). Le Danemark a ~75% de VRE dans un petit systeme, ce qui sollicite fortement la flex modelisee. |
 
 **Regle de lecture** : SR < 0.01 = surplus marginal. SR entre 0.01 et 0.05 = surplus significatif. SR > 0.05 = surplus structurel, la flex est sollicitee en permanence.
 """
@@ -310,17 +374,18 @@ Le SR est la somme annuelle de ces surplus rapportee a la generation totale.
             """
 ##### FAR — Flex Absorption Ratio
 
-**Definition** : FAR = energie absorbee par la flexibilite domestique / surplus total.
-Il mesure **quelle fraction du surplus est effectivement "digeree" par le systeme** (PSH, BESS, DSM, hors exports).
+**Definition** : FAR = energie absorbee par la flexibilite modelisee / surplus total.
+Dans ce modele, la flexibilite modelisee = `flex_effective = sink_non_bess + bess_charge`.
+En mode `observed`, `sink_non_bess` inclut le pompage PSH et `net_position>0` (exports nets positifs).
 
 **Formule** : FAR = min(surplus, flex_effective).sum() / surplus.sum(). Un FAR de 1.0 signifie que toute l'energie excedentaire est absorbee localement.
 
 | Exemple | FAR | Signification concrete |
 |---------|------|----------------------|
-| Allemagne 2024 | 0.979 | La flex domestique absorbe 97.9% du surplus. Seuls 2.1% restent non absorbes. Le systeme est sous tension mais tient. |
+| Allemagne 2024 | 0.979 | La flexibilite modelisee absorbe 97.9% du surplus. Seuls 2.1% restent non absorbes dans le perimetre du modele. |
 | Espagne 2024 | 0.922 | 92.2% absorbe. Le deficit de flex commence a se voir : 7.8% de surplus residuel, correspondant a des heures ou ni le PSH ni les batteries ne suffisent. |
-| Danemark 2024 | 0.847 | 84.7% absorbe. Le DK a beaucoup de VRE mais peu de flex domestique (0.8 GW). 15.3% du surplus n'est pas absorbe localement → depend des exports vers NO/SE/DE. |
-| France 2024 | 0.769 | 76.9% absorbe. La France a un gros surplus (SR=0.107) ET une flex domestique limitee par rapport a ce surplus. Pres d'un quart du surplus reste non absorbe. |
+| Danemark 2024 | 0.847 | 84.7% absorbe. Le residuel (15.3%) signale une contrainte de flex dans le perimetre modelise. |
+| France 2024 | 0.769 | 76.9% absorbe. Avec un surplus eleve (SR=0.107), le residuel non absorbe reste important dans le perimetre modelise. |
 
 **Regle de lecture** : FAR > 0.95 = flex suffisante. FAR entre 0.80 et 0.95 = flex sous tension. FAR < 0.80 = deficit de flex, le systeme depend des exports ou des curtailments.
 
@@ -354,10 +419,10 @@ Il mesure la **rigidite structurelle du systeme en creux de charge** : quelle pa
             """
 ##### TTL — Thermal Tail Level
 
-**Definition** : TTL = prix moyen pondere observe sur les heures de regimes C et D.
-Il mesure le **cout marginal thermique effectif** : le prix moyen des heures ou c'est une centrale thermique (gaz, charbon) qui fixe le prix.
+**Definition** : TTL = quantile 95% de `price_used` sur les heures de regimes C et D.
+Il mesure la **queue haute des prix** quand le systeme est en regimes thermiques/pointe.
 
-**Formule** : TTL = moyenne ponderee des prix day-ahead sur les heures classees en regime C (thermique marginal) et D (pointe). Les heures de surplus (A, B) sont exclues.
+**Formule** : TTL = Q95(`price_used`) sur heures C+D. Les heures de surplus (A, B) sont exclues.
 
 | Exemple | TTL | Signification concrete |
 |---------|------|----------------------|
@@ -456,7 +521,7 @@ La flexibilite domestique commence a absorber une part significative du surplus.
 
 | Critere | Seuil | Points | Signification |
 |---------|-------|--------|---------------|
-| FAR | ≥ 0.60 | +1 | Au moins 60% du surplus est absorbe par la flex domestique |
+| FAR | ≥ 0.60 | +1 | Au moins 60% du surplus est absorbe par la flex modelisee |
 | FAR (seuil fort) | ≥ 0.80 | +2 (bonus) | Absorption elevee — la flex est dimensionnee pour le surplus actuel |
 | Tendance heures negatives | Baissiere | (qualitatif) | Les heures negatives doivent **diminuer** dans le temps — pas juste un FAR eleve ponctuellement |
 

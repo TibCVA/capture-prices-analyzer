@@ -9,11 +9,15 @@ import streamlit as st
 
 from src.commentary_bridge import so_what_block
 from src.constants import (
+    COL_BESS_CHARGE,
     COL_FLEX_EFFECTIVE,
     COL_LOAD,
+    COL_NET_POSITION,
     COL_NRL,
     COL_PRICE_DA,
+    COL_PSH_PUMP,
     COL_REGIME,
+    COL_SINK_NON_BESS,
     COL_SURPLUS,
     COL_SURPLUS_UNABS,
     COL_VRE,
@@ -69,12 +73,28 @@ df = ensure_plot_columns(
         COL_SURPLUS_UNABS,
         COL_REGIME,
         COL_PRICE_DA,
+        COL_SINK_NON_BESS,
+        COL_BESS_CHARGE,
+        COL_NET_POSITION,
+        COL_PSH_PUMP,
     ],
     with_notice=True,
 )
 df = coerce_numeric_columns(
     df,
-    [COL_LOAD, COL_VRE, COL_NRL, COL_SURPLUS, COL_FLEX_EFFECTIVE, COL_SURPLUS_UNABS, COL_PRICE_DA],
+    [
+        COL_LOAD,
+        COL_VRE,
+        COL_NRL,
+        COL_SURPLUS,
+        COL_FLEX_EFFECTIVE,
+        COL_SURPLUS_UNABS,
+        COL_PRICE_DA,
+        COL_SINK_NON_BESS,
+        COL_BESS_CHARGE,
+        COL_NET_POSITION,
+        COL_PSH_PUMP,
+    ],
 )
 missing_cols = df.attrs.get("_missing_plot_columns", [])
 if missing_cols:
@@ -120,6 +140,52 @@ render_commentary(
         decision_use="Qualifier si le probleme dominant est la generation en surplus ou le manque de flexibilite disponible.",
     )
 )
+
+surplus_total_mwh = float(df[COL_SURPLUS].fillna(0.0).sum())
+absorbed_model_mwh = float(np.minimum(df[COL_SURPLUS].fillna(0.0), df[COL_FLEX_EFFECTIVE].fillna(0.0)).sum())
+unabsorbed_mwh = float(df[COL_SURPLUS_UNABS].fillna(0.0).sum())
+exports_pos_mwh = (
+    float(df[COL_NET_POSITION].fillna(0.0).clip(lower=0.0).sum()) if COL_NET_POSITION in df.columns else float("nan")
+)
+psh_pump_mwh = (
+    float(df[COL_PSH_PUMP].fillna(0.0).clip(lower=0.0).sum()) if COL_PSH_PUMP in df.columns else float("nan")
+)
+bess_charge_mwh = (
+    float(df[COL_BESS_CHARGE].fillna(0.0).sum()) if COL_BESS_CHARGE in df.columns else float("nan")
+)
+
+render_commentary(
+    so_what_block(
+        title="Interpretation physique du residuel",
+        purpose="Clarifier que le surplus non absorbe est un residuel de modele et non une energie qui 'disparait'.",
+        observed={
+            "surplus_total_twh": surplus_total_mwh * 1e-6,
+            "absorbed_model_twh": absorbed_model_mwh * 1e-6,
+            "surplus_unabsorbed_twh": unabsorbed_mwh * 1e-6,
+            "exports_pos_twh": exports_pos_mwh * 1e-6 if np.isfinite(exports_pos_mwh) else np.nan,
+            "psh_pump_twh": psh_pump_mwh * 1e-6 if np.isfinite(psh_pump_mwh) else np.nan,
+            "bess_charge_twh": bess_charge_mwh * 1e-6 if np.isfinite(bess_charge_mwh) else np.nan,
+        },
+        method_link=(
+            "Identite v3: surplus_unabsorbed = max(0, surplus - flex_effective), "
+            "flex_effective = sink_non_bess + bess_charge; en observed, sink_non_bess inclut PSH et exports nets positifs."
+        ),
+        limits=(
+            "Le residuel signale une energie a traiter hors des sinks explicitement modelises "
+            "(curtailment/modulation forcee/flex non observees/ajustements infra-horaires)."
+        ),
+        n=len(df),
+        decision_use="Interpreter le niveau du regime A comme indicateur de contrainte systeme, pas comme anomalie physique.",
+    )
+)
+
+if country == "FR":
+    dynamic_narrative(
+        "Lecture France: un residuel eleve traduit surtout un volume de surplus tres important par rapport aux "
+        "capacites d'absorption modelisees. Ce signal appelle des leviers de flexibilite/curtailment, "
+        "pas une remise en cause de l'equilibre physique du systeme.",
+        severity="warning" if unabsorbed_mwh > 0 else "info",
+    )
 
 section_header("Distribution NRL et surplus non absorbe", "Histogrammes")
 st.caption("NRL colore par regime (gauche), surplus residuel (droite).")

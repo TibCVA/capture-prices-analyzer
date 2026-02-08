@@ -59,6 +59,8 @@ df = ensure_plot_columns(
         "far",
         "ir",
         "ttl",
+        "total_surplus_twh",
+        "total_surplus_unabs_twh",
     ],
     with_notice=True,
 )
@@ -78,6 +80,8 @@ df = coerce_numeric_columns(
         "far",
         "ir",
         "ttl",
+        "total_surplus_twh",
+        "total_surplus_unabs_twh",
     ],
 )
 missing_cols = df.attrs.get("_missing_plot_columns", [])
@@ -150,6 +154,33 @@ render_commentary(
         decision_use="Verifier le timing de bascule avant de fixer des objectifs de capacite supplementaire.",
     )
 )
+
+if country == "FR" and not df_vis.empty:
+    latest = df_vis.iloc[-1]
+    render_commentary(
+        so_what_block(
+            title="France - interpretation physique du surplus non absorbe",
+            purpose="Eviter l'erreur d'interpretation 'electricite perdue': le residuel est un reliquat apres flexibilites modelisees.",
+            observed={
+                "year": float(latest.get("year", np.nan)),
+                "sr": float(latest.get("sr", np.nan)),
+                "far": float(latest.get("far", np.nan)),
+                "h_regime_a": float(latest.get("h_regime_a", np.nan)),
+                "total_surplus_twh": float(latest.get("total_surplus_twh", np.nan)),
+                "total_surplus_unabs_twh": float(latest.get("total_surplus_unabs_twh", np.nan)),
+            },
+            method_link=(
+                "Dans le pipeline v3: surplus_unabsorbed = max(0, surplus - flex_effective), "
+                "avec flex_effective = sink_non_bess + bess_charge."
+            ),
+            limits=(
+                "Le reliquat indique une energie a gerer hors sinks explicites du modele "
+                "(curtailment, modulation forcee, flexibilites non observees, ajustements infra-horaires)."
+            ),
+            n=len(df_vis),
+            decision_use="Lire ce signal comme contrainte systeme et besoin de leviers, pas comme impossibilite physique.",
+        )
+    )
 
 section_header("Repartition des regimes A/B/C/D", "Heures annuelles par regime")
 _regime_bar_colors = {
