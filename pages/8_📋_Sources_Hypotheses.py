@@ -6,6 +6,7 @@ import streamlit as st
 
 from src.commentary_bridge import so_what_block
 from src.constants import (
+    COAL_GAS_INDEX_RATIO,
     EF_COAL,
     EF_GAS,
     EF_LIGNITE,
@@ -61,7 +62,7 @@ st.markdown(
 
 section_header("Hypotheses modifiables", "Utiles pour sensibilite et calibration")
 
-tab_therm, tab_bess, tab_price = st.tabs(["Thermique", "BESS", "Seuils prix"])
+tab_therm, tab_bess, tab_price, tab_flex = st.tabs(["Thermique", "BESS", "Seuils prix", "Flex scenario"])
 
 with tab_therm:
     st.markdown("#### Rendements thermiques")
@@ -94,6 +95,14 @@ with tab_therm:
         ov["vom_coal"] = st.number_input("vom_coal", min_value=0.0, max_value=15.0, value=float(ov.get("vom_coal", VOM_COAL)), step=0.5)
     with c4:
         ov["vom_lignite"] = st.number_input("vom_lignite", min_value=0.0, max_value=15.0, value=float(ov.get("vom_lignite", VOM_LIGNITE)), step=0.5)
+    ov["coal_gas_index_ratio"] = st.number_input(
+        "coal_gas_index_ratio",
+        min_value=0.10,
+        max_value=1.00,
+        value=float(ov.get("coal_gas_index_ratio", COAL_GAS_INDEX_RATIO)),
+        step=0.01,
+        help="Utilise pour approximer le charbon si coal_daily.csv absent.",
+    )
 
 with tab_bess:
     st.markdown("#### Parametres BESS de simulation")
@@ -135,6 +144,36 @@ with tab_price:
             "spread_daily_threshold", min_value=0.0, max_value=500.0, value=float(ov.get("spread_daily_threshold", SPREAD_DAILY_THRESHOLD)), step=5.0
         )
 
+with tab_flex:
+    st.markdown("#### Parametres de flexibilite scenario (appliques en surcharge)")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        ov["delta_export_max_gw"] = st.number_input(
+            "delta_export_max_gw",
+            min_value=-10.0,
+            max_value=20.0,
+            value=float(ov.get("delta_export_max_gw", 0.0)),
+            step=0.5,
+        )
+    with c2:
+        ov["delta_psh_pump_gw"] = st.number_input(
+            "delta_psh_pump_gw",
+            min_value=-5.0,
+            max_value=20.0,
+            value=float(ov.get("delta_psh_pump_gw", 0.0)),
+            step=0.5,
+        )
+    with c3:
+        ov["delta_dsm_gw"] = st.number_input(
+            "delta_dsm_gw",
+            min_value=-5.0,
+            max_value=20.0,
+            value=float(ov.get("delta_dsm_gw", 0.0)),
+            step=0.5,
+        )
+
+    st.caption("Ces deltas sont appliques via `scenario_overrides` au prochain recalcul complet.")
+
 state["ui_overrides"] = ov
 
 c1, c2 = st.columns([1, 3])
@@ -155,6 +194,13 @@ st.markdown(
     """
 )
 
+section_header("Overrides actifs", "Trace des hypotheses effectivement surchargees")
+if state.get("ui_overrides"):
+    ov_table = [{"key": k, "value": v} for k, v in sorted(state["ui_overrides"].items())]
+    st.dataframe(ov_table, use_container_width=True, hide_index=True)
+else:
+    st.info("Aucun override actif: le modele utilise strictement constants.py + YAML.")
+
 render_commentary(
     so_what_block(
         title="Cadre des hypotheses",
@@ -163,5 +209,6 @@ render_commentary(
         method_link="Overrides session-scopes appliques au recalcul; defaults constants/YAML restent references.",
         limits="Les overrides sont exploratoires; ils ne remplacent pas une calibration gouvernee.",
         n=1,
+        decision_use="Tracer clairement les hypotheses actives avant tout partage de conclusion.",
     )
 )

@@ -9,9 +9,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_bridge import comment_scenario_delta, so_what_block
+from src.constants import PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
-from src.state_adapter import metrics_to_dataframe, normalize_metrics_record
+from src.state_adapter import coerce_numeric_columns, metrics_to_dataframe, normalize_metrics_record
 from src.ui_helpers import (
     challenge_block,
     guard_no_data,
@@ -23,9 +24,9 @@ from src.ui_helpers import (
     section_header,
 )
 
-st.set_page_config(page_title="Scenarios", page_icon="??", layout="wide")
+st.set_page_config(page_title="Scenarios", page_icon="🔮", layout="wide")
 inject_global_css()
-st.title("?? Scenarios")
+st.title("🔮 Scenarios")
 
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
@@ -34,7 +35,7 @@ normalize_state_metrics(state)
 
 proc = state.get("processed", {})
 df_all = metrics_to_dataframe(state, state.get("price_mode"))
-if not proc or df_all.empty:
+if not proc or df_all.empty or "country" not in df_all.columns:
     guard_no_data("la page Scenarios")
 
 countries = sorted({k[0] for k in proc.keys()})
@@ -142,8 +143,11 @@ if st.button("Executer scenario", type="primary"):
             "scenario": [m_s["h_regime_a"], m_s["h_regime_b"], m_s["h_regime_c"], m_s["h_regime_d"]],
         }
     )
+    chart_df = coerce_numeric_columns(chart_df, ["baseline", "scenario"])
     fig1 = px.bar(chart_df, x="regime", y=["baseline", "scenario"], barmode="group")
-    fig1.update_layout(height=350)
+    fig1.update_layout(height=350, **PLOTLY_LAYOUT_DEFAULTS)
+    fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+    fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig1, use_container_width=True)
 
     render_commentary(
@@ -157,12 +161,15 @@ if st.button("Executer scenario", type="primary"):
             method_link="Reclassement regimes apres perturbation physique et dispatch BESS deterministe.",
             limits="Ne modelise pas explicitement les congestions intra-zonales.",
             n=4,
+            decision_use="Verifier que le scenario cible reduit effectivement les heures A avant de communiquer un benefice.",
         )
     )
 
     section_header("Graphique 2 - Distribution price_used", "Scenario")
     fig2 = px.histogram(df_s, x="price_used_eur_mwh", nbins=80)
-    fig2.update_layout(height=350)
+    fig2.update_layout(height=350, **PLOTLY_LAYOUT_DEFAULTS)
+    fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+    fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig2, use_container_width=True)
 
     render_commentary(
@@ -173,6 +180,7 @@ if st.button("Executer scenario", type="primary"):
             method_link="price_used = price_synth en mode scenario par defaut.",
             limits="Prix synthetique indicatif; ne pas interpreter comme forecast spot transactionnel.",
             n=len(df_s),
+            decision_use="Tester rapidement la direction de variation de la queue de prix sous hypothese de scenario.",
         )
     )
 
@@ -199,5 +207,6 @@ if st.button("Executer scenario", type="primary"):
             method_link="Memes formules metriques que l'historique, comparaison coherent baseline/scenario.",
             limits="Resultat conditionnel aux hypotheses scenario actives.",
             n=len(table),
+            decision_use="Selectionner les scenarios qui ameliorent FAR et capture ratio sans aggraver SR.",
         )
     )

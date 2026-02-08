@@ -9,8 +9,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_bridge import comment_regression, so_what_block
+from src.constants import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.slope_analysis import compute_slope
-from src.state_adapter import ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
+from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,
@@ -22,9 +23,9 @@ from src.ui_helpers import (
     section_header,
 )
 
-st.set_page_config(page_title="Capture Rates", page_icon="??", layout="wide")
+st.set_page_config(page_title="Capture Rates", page_icon="📈", layout="wide")
 inject_global_css()
-st.title("?? Capture Rates")
+st.title("📈 Capture Rates")
 
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
@@ -35,7 +36,7 @@ metrics_dict = state.get("metrics", {})
 proc = state.get("processed", {})
 
 df_all = metrics_to_dataframe(state, state.get("price_mode"))
-if df_all.empty:
+if df_all.empty or "country" not in df_all.columns:
     guard_no_data("la page Capture Rates")
 
 countries = sorted(df_all["country"].dropna().unique())
@@ -49,7 +50,10 @@ x_key = "pv_penetration_pct_gen" if tech == "PV" else "wind_penetration_pct_gen"
 y_key = "capture_ratio_pv" if tech == "PV" else "capture_ratio_wind"
 
 plot_df = df_all[df_all["country"].isin(selected)].copy()
-plot_df = ensure_plot_columns(plot_df, [x_key, y_key, "year", "country", "is_outlier"])
+plot_df = ensure_plot_columns(plot_df, [x_key, y_key, "year", "country", "is_outlier"], with_notice=True)
+plot_df = coerce_numeric_columns(plot_df, [x_key, y_key, "year"])
+if plot_df.attrs.get("_missing_plot_columns", []):
+    st.info("Colonnes completees en NaN pour robustesse: " + ", ".join(plot_df.attrs.get("_missing_plot_columns", [])))
 plot_df = plot_df.dropna(subset=[x_key, y_key])
 if plot_df.empty:
     guard_no_data("la page Capture Rates")
@@ -60,7 +64,14 @@ narrative(
 )
 
 section_header("Scatter penetration vs capture ratio", "Regression par pays")
-fig1 = px.scatter(plot_df, x=x_key, y=y_key, color="country", hover_data=["year"]) 
+fig1 = px.scatter(
+    plot_df,
+    x=x_key,
+    y=y_key,
+    color="country",
+    color_discrete_map=COUNTRY_PALETTE,
+    hover_data=["year"],
+)
 
 for c in sorted(plot_df["country"].unique()):
     metrics_list = []
@@ -77,7 +88,9 @@ for c in sorted(plot_df["country"].unique()):
         y_line = slope["slope"] * x_line + slope["intercept"]
         fig1.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines", name=f"{c} reg", showlegend=False))
 
-fig1.update_layout(height=430)
+fig1.update_layout(height=430, **PLOTLY_LAYOUT_DEFAULTS)
+fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
 st.plotly_chart(fig1, use_container_width=True)
 
 slope_all = compute_slope(
@@ -118,6 +131,9 @@ for k in pairs:
     xx = np.linspace(0, 100, len(yy))
     fig2.add_trace(go.Scatter(x=xx, y=yy, mode="lines", name=str(k[1])))
 fig2.update_layout(height=400, xaxis_title="% du temps", yaxis_title="EUR/MWh")
+fig2.update_layout(**PLOTLY_LAYOUT_DEFAULTS)
+fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
 st.plotly_chart(fig2, use_container_width=True)
 
 if pairs:
@@ -132,10 +148,11 @@ render_commentary(
         purpose="Mesurer l'amplitude des heures extremes et leur impact potentiel sur TTL et la valeur flex",
         observed={"price_used_p95_latest": p95},
         method_link="Courbe de duree construite sur prix DA observes; quantiles price_used selon G.7.",
-        limits="Tres sensible aux episodes de crise et aux anomalies de donnees.",
-        n=len(pairs),
-    )
-)
+                limits="Tres sensible aux episodes de crise et aux anomalies de donnees.",
+                n=len(pairs),
+                decision_use="Quantifier le risque de queue de prix avant de fixer la valeur cible de flexibilite.",
+            )
+        )
 
 section_header("Heatmap prix observe (mois x heure locale)", "Structure intra-annuelle")
 years = sorted({k[1] for k in pairs})
@@ -148,7 +165,7 @@ if years:
         tmp = pd.DataFrame({"price": d["price_da_eur_mwh"].values, "month": local.month, "hour": local.hour})
         pivot = tmp.pivot_table(index="month", columns="hour", values="price", aggfunc="mean")
         fig3 = px.imshow(pivot, aspect="auto", labels={"x": "Heure", "y": "Mois", "color": "EUR/MWh"})
-        fig3.update_layout(height=420)
+        fig3.update_layout(height=420, **PLOTLY_LAYOUT_DEFAULTS)
         st.plotly_chart(fig3, use_container_width=True)
 
         render_commentary(
@@ -159,5 +176,6 @@ if years:
                 method_link="Aggregation locale mois x heure sur prix observes.",
                 limits="Moyennes locales: les extremes intramensuels sont lisses.",
                 n=int(pivot.size),
+                decision_use="Repérer les plages horaires saisonnieres les plus exposees a la compression de prix.",
             )
         )

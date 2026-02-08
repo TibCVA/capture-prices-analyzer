@@ -7,7 +7,7 @@ from collections.abc import Mapping
 import numpy as np
 
 
-def _fmt(value, digits: int = 2, unit: str = "") -> str:
+def _fmt(value, digits: int = 2) -> str:
     if value is None:
         return "NaN"
     try:
@@ -16,7 +16,13 @@ def _fmt(value, digits: int = 2, unit: str = "") -> str:
         return str(value)
     if np.isnan(v):
         return "NaN"
-    return f"{v:.{digits}f}{unit}"
+    return f"{v:.{digits}f}"
+
+
+def _format_observed(observed: Mapping[str, float | int | None]) -> str:
+    if not observed:
+        return "-"
+    return ", ".join(f"{k}={_fmt(v)}" for k, v in observed.items())
 
 
 def so_what_block(
@@ -26,17 +32,34 @@ def so_what_block(
     method_link: str,
     limits: str,
     n: int,
+    implication: str | None = None,
+    decision_use: str | None = None,
+    confidence: float | None = None,
 ) -> str:
-    """Standardized commentary block for every chart/screen."""
+    """Standardized commentary block used on all charts/screens."""
 
-    vals = ", ".join(f"{k}={_fmt(v)}" for k, v in observed.items()) if observed else "-"
-    return (
-        f"**{title}**\n"
-        f"- Constat chiffre: n={n}; {vals}.\n"
-        f"- So what: {purpose}.\n"
-        f"- Lien methode: {method_link}.\n"
-        f"- Limites/portee: {limits}."
-    )
+    observed_str = _format_observed(observed)
+    implication_txt = implication or purpose
+    decision_txt = decision_use or "Prioriser les leviers a activer et calibrer les hypotheses de scenario."
+
+    lines = [
+        f"**{title}**",
+        f"- Constat chiffre: n={int(n)}; {observed_str}.",
+        f"- Ce que cela signifie: {implication_txt}.",
+        f"- Pourquoi cette analyse sert a decider: {decision_txt}.",
+        f"- Lien methode: {method_link}.",
+        f"- Limites: {limits}.",
+    ]
+
+    if confidence is not None:
+        try:
+            conf_val = float(confidence)
+            if np.isfinite(conf_val):
+                lines.append(f"- Niveau de confiance: {conf_val:.2f}.")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
 
 
 def commentary_block(
@@ -62,7 +85,7 @@ def commentary_block(
 def comment_kpi(metrics: dict, label: str = "KPI") -> str:
     return so_what_block(
         title=label,
-        purpose="Qualification rapide du stade de stress et de la capacite d'absorption du systeme",
+        purpose="Le systeme combine niveau de surplus, capacite d'absorption et rigidite de creux.",
         observed={
             "SR": metrics.get("sr"),
             "FAR": metrics.get("far"),
@@ -73,13 +96,14 @@ def comment_kpi(metrics: dict, label: str = "KPI") -> str:
         method_link="Ratios calcules selon G.7 (SR/FAR/IR/TTL) et capture sur price_used.",
         limits="Interpretation valable sous reserve de completude des donnees et du mode de prix selectionne.",
         n=1,
+        decision_use="Qualifier rapidement le stade de stress et choisir le prochain levier (flex, must-run, cadence VRE).",
     )
 
 
 def comment_regression(slope: dict, x_name: str, y_name: str) -> str:
     return so_what_block(
         title=f"Regression {y_name} vs {x_name}",
-        purpose="Quantifier la pente de degradation ou d'amelioration et sa robustesse statistique",
+        purpose="La pente mesure le rythme de degradation/ameliorement; r2 et p-value mesurent la robustesse.",
         observed={
             "slope": slope.get("slope"),
             "r_squared": slope.get("r_squared"),
@@ -88,6 +112,7 @@ def comment_regression(slope: dict, x_name: str, y_name: str) -> str:
         method_link="Regression lineaire scipy.stats.linregress, exclusion optionnelle des outliers.",
         limits="Association statistique uniquement; pas d'inference causale sans identification complementaire.",
         n=int(slope.get("n_points", 0) or 0),
+        decision_use="Comparer la sensibilite des pays et calibrer les hypotheses de transition entre phases.",
     )
 
 
@@ -100,7 +125,7 @@ def comment_distribution(metrics: dict, title: str = "Distribution") -> str:
     )
     return so_what_block(
         title=title,
-        purpose="Lire la structure physique des heures et le niveau de saturation du systeme",
+        purpose="La repartition des heures indique si le stress est transitoire (B/C) ou structurel (A).",
         observed={
             "h_A": metrics.get("h_regime_a"),
             "h_B": metrics.get("h_regime_b"),
@@ -111,6 +136,7 @@ def comment_distribution(metrics: dict, title: str = "Distribution") -> str:
         method_link="Regimes classes uniquement sur variables physiques (anti-circularite G.6).",
         limits="Un score de coherence faible signale une divergence modele/marche, pas necessairement une erreur de code.",
         n=n_hours,
+        decision_use="Prioriser les leviers de flexibilite sur les regimes dominants plutot que sur la moyenne annuelle seule.",
     )
 
 
@@ -125,9 +151,10 @@ def comment_scenario_delta(base: dict, scen: dict) -> str:
     }
     return so_what_block(
         title="Impact scenario",
-        purpose="Identifier si le scenario reduit la saturation (A) et ameliore l'absorption (FAR)",
+        purpose="Les deltas indiquent si le scenario reduit la saturation et restaure la valeur captee.",
         observed=obs,
         method_link="Recalcul complet NRL -> regimes -> TCA -> price_synth -> metrics (F.1, G.9).",
         limits="Resultats indicatifs sur prix synthetique; pas de prevision spot DA reelle.",
         n=1,
+        decision_use="Arbitrer entre leviers (BESS, demande, must-run, commodites) sur des effets mesurables.",
     )

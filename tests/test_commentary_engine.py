@@ -11,13 +11,16 @@ def test_so_what_block_format() -> None:
         method_link="Methode",
         limits="Limites",
         n=12,
+        decision_use="Decision",
     )
 
     assert "Constat chiffre" in txt
-    assert "So what" in txt
+    assert "Ce que cela signifie" in txt
+    assert "Pourquoi cette analyse sert a decider" in txt
     assert "Lien methode" in txt
-    assert "Limites/portee" in txt
+    assert "Limites" in txt
     assert "n=12" in txt
+    assert "Decision" in txt
 
 
 def test_comment_kpi_contains_core_ratios() -> None:

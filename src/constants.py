@@ -179,3 +179,45 @@ PHASE_COLORS = {
     "stage_4": "#e7298a",
     "unknown": "#666666",
 }
+
+COUNTRY_PALETTE = {
+    "FR": "#003399",
+    "DE": "#FFCC00",
+    "ES": "#CC0000",
+    "PL": "#DC143C",
+    "DK": "#C8102E",
+    "NL": "#FF6F00",
+    "BE": "#111111",
+    "IT": "#008C45",
+    "AT": "#ED2939",
+    "CH": "#D52B1E",
+}
+
+PLOTLY_LAYOUT_DEFAULTS = {
+    "template": "plotly_white",
+    "font": {"family": "Segoe UI, Arial, sans-serif", "size": 13, "color": "#1f2937"},
+    "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
+    "margin": {"l": 52, "r": 28, "t": 48, "b": 46},
+    "plot_bgcolor": "#ffffff",
+    "paper_bgcolor": "#ffffff",
+    "hovermode": "closest",
+}
+
+PLOTLY_AXIS_DEFAULTS = {
+    "showgrid": True,
+    "gridcolor": "#e5e7eb",
+    "zeroline": False,
+    "linecolor": "#cbd5e1",
+    "mirror": False,
+}
+
+# Statut interpretable des liens NRL/prix observes
+CORRELATION_STATUS_THRESHOLDS = {
+    "weak": 0.20,
+    "medium": 0.45,
+}
+
+COHERENCE_STATUS_THRESHOLDS = {
+    "weak": 0.55,
+    "medium": 0.70,
+}

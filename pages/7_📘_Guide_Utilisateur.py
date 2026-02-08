@@ -55,7 +55,20 @@ with st.expander("3) Comment interpreter les ecrans"):
         """
     )
 
-with st.expander("4) Bonnes pratiques de rigueur"):
+with st.expander("4) Correlation NRL/prix vs coherence regime/prix", expanded=True):
+    st.markdown(
+        """
+- **Correlation NRL/prix observe**: mesure la relation lineaire globale (Pearson).
+- **Coherence regime/prix**: mesure si chaque regime A/B/C/D se place dans sa plage de prix attendue.
+
+Ces deux indicateurs sont complementaires:
+- correlation forte + coherence faible = lien global present mais segmentation regime a recalibrer;
+- correlation faible + coherence correcte = structure regime plausible mais bruit de prix important;
+- les deux eleves = base robuste pour interpretation et scenario.
+        """
+    )
+
+with st.expander("5) Bonnes pratiques de rigueur"):
     st.markdown(
         """
 - Toujours verifier data_completeness et regime_coherence avant conclusion forte.
@@ -65,7 +78,7 @@ with st.expander("4) Bonnes pratiques de rigueur"):
         """
     )
 
-with st.expander("5) Limites du modele"):
+with st.expander("6) Limites du modele"):
     st.markdown(
         """
 - Le prix scenario est synthetique (affine par regimes), pas un forecast spot transactionnel.
@@ -83,5 +96,6 @@ render_commentary(
         method_link="Conventions v3: separation stricte structurel vs observable, anti-circularite des regimes.",
         limits="Le modele structure la discussion de decision; il ne remplace pas une etude de dispatch detaillee.",
         n=1,
+        decision_use="Fournir une base commune de lecture avant presentation des resultats aux equipes metier.",
     )
 )

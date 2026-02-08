@@ -10,7 +10,8 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from src.commentary_bridge import so_what_block
-from src.state_adapter import ensure_plot_columns, metrics_to_dataframe
+from src.constants import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
+from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,
@@ -22,9 +23,9 @@ from src.ui_helpers import (
     section_header,
 )
 
-st.set_page_config(page_title="Analyse historique", page_icon="??", layout="wide")
+st.set_page_config(page_title="Analyse historique", page_icon="📊", layout="wide")
 inject_global_css()
-st.title("?? Analyse Historique")
+st.title("📊 Analyse Historique")
 
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
@@ -32,7 +33,7 @@ if not state or not state.get("data_loaded"):
 normalize_state_metrics(state)
 
 df_all = metrics_to_dataframe(state, state.get("price_mode"))
-if df_all.empty:
+if df_all.empty or "country" not in df_all.columns:
     guard_no_data("la page Analyse Historique")
 
 countries = sorted(df_all["country"].dropna().unique())
@@ -59,7 +60,29 @@ df = ensure_plot_columns(
         "ir",
         "ttl",
     ],
+    with_notice=True,
 )
+df = coerce_numeric_columns(
+    df,
+    [
+        "capture_ratio_pv",
+        "capture_ratio_wind",
+        "pv_penetration_pct_gen",
+        "h_regime_a",
+        "h_regime_b",
+        "h_regime_c",
+        "h_regime_d",
+        "h_negative_obs",
+        "h_below_5_obs",
+        "sr",
+        "far",
+        "ir",
+        "ttl",
+    ],
+)
+missing_cols = df.attrs.get("_missing_plot_columns", [])
+if missing_cols:
+    st.info("Colonnes completees en NaN pour robustesse de rendu: " + ", ".join(missing_cols))
 
 if state.get("exclude_2022", True):
     df_vis = df[df["year"] != 2022].copy()
@@ -105,9 +128,10 @@ fig1.add_trace(
     ),
     secondary_y=True,
 )
-fig1.update_layout(height=480, barmode="group", xaxis_title="Annee")
+fig1.update_layout(height=480, barmode="group", xaxis_title="Annee", **PLOTLY_LAYOUT_DEFAULTS)
 fig1.update_yaxes(title_text="Heures observees", secondary_y=False)
 fig1.update_yaxes(title_text="Ratio / part", secondary_y=True)
+fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
@@ -122,6 +146,7 @@ render_commentary(
         method_link="Observables prix sur price_da; capture ratio sur price_used, selon G.7.",
         limits="Association descriptive: la causalite complete exige une analyse multivariee complementaire.",
         n=len(df_vis),
+        decision_use="Verifier le timing de bascule avant de fixer des objectifs de capacite supplementaire.",
     )
 )
 
@@ -132,7 +157,9 @@ fig2 = px.bar(
     y=["h_regime_a", "h_regime_b", "h_regime_c", "h_regime_d"],
     labels={"value": "Heures", "variable": "Regime"},
 )
-fig2.update_layout(height=390)
+fig2.update_layout(height=390, **PLOTLY_LAYOUT_DEFAULTS)
+fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
 st.plotly_chart(fig2, use_container_width=True)
 
 render_commentary(
@@ -147,6 +174,7 @@ render_commentary(
         method_link="Classification regimes strictement physique (NRL/surplus/flex).",
         limits="Depend du mode must-run/flex choisi pour la session.",
         n=len(df_vis),
+        decision_use="Identifier si le stress est transitoire ou deja structurel dans les regimes A.",
     )
 )
 

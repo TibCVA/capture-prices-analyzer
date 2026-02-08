@@ -32,6 +32,9 @@ except Exception:
         method_link: str,
         limits: str,
         n: int,
+        implication: str | None = None,
+        decision_use: str | None = None,
+        confidence: float | None = None,
     ) -> str:
         if _legacy_commentary_block is not None:
             return _legacy_commentary_block(
@@ -43,12 +46,15 @@ except Exception:
                 limits=limits,
             )
         vals = ", ".join(f"{k}={_fmt_value(v)}" for k, v in observed.items()) if observed else "-"
+        implication_txt = implication or purpose
+        decision_txt = decision_use or "Utiliser ce resultat pour calibrer les decisions de pilotage."
         return (
             f"**{title}**\n"
             f"- Constat chiffre: n={n}; {vals}.\n"
-            f"- So what: {purpose}.\n"
+            f"- Ce que cela signifie: {implication_txt}.\n"
+            f"- Pourquoi cette analyse sert a decider: {decision_txt}.\n"
             f"- Lien methode: {method_link}.\n"
-            f"- Limites/portee: {limits}."
+            f"- Limites: {limits}."
         )
 
     def comment_kpi(metrics: dict, label: str = "KPI") -> str:

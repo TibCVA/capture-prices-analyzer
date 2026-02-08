@@ -1,4 +1,4 @@
-# Capture Prices Analyzer (v3.0)
+ï»¿# Capture Prices Analyzer (v3.0)
 
 Outil d'analyse outside-in des capture prices renouvelables en Europe.
 
@@ -27,10 +27,11 @@ Outil d'analyse outside-in des capture prices renouvelables en Europe.
 Consequence: le pompage doit etre traite explicitement comme composante de flex; pas de double comptage via `generation-load`.
 
 ## Hypotheses modifiables UI
-Page `?? Sources & Hypotheses`:
+Page `ðŸ“‹ Sources & Hypotheses`:
 - Rendements/emissions/VOM thermiques
 - Parametres BESS de simulation
 - Seuils observables prix
+- Deltas de flexibilite scenario
 
 Ces hypotheses sont stockees dans `st.session_state.state['ui_overrides']` et appliquees au prochain `Charger donnees`.
 Les references par defaut restent `constants.py` et `config/*.yaml`.
@@ -38,11 +39,18 @@ Les references par defaut restent `constants.py` et `config/*.yaml`.
 ## Comment lire les commentaires analytiques
 Chaque ecran/graphique suit le format:
 1. Constat chiffre
-2. So what (implication business)
-3. Lien methode
-4. Limites/portee
+2. Ce que cela signifie
+3. Pourquoi cette analyse sert a decider
+4. Lien methode
+5. Limites/portee
 
-Objectif: interpretation rigoureuse, objective, traçable.
+Objectif: interpretation rigoureuse, objective, tracable.
+
+## Correlation vs coherence
+- `Correlation NRL/prix observe`: relation lineaire globale (Pearson) entre NRL et prix DA.
+- `Regime coherence`: adequation de chaque regime `A/B/C/D` a sa plage de prix attendue.
+
+Ces deux signaux sont complementaires et doivent etre lus ensemble.
 
 ## Structure
 - `src/config_loader.py`: validation YAML + resolution code ENTSO-E variable dans le temps
@@ -56,7 +64,7 @@ Objectif: interpretation rigoureuse, objective, traçable.
 ## Limites
 - Prix scenario: `price_synth` indicatif (affine par regimes, ancre TCA), pas prevision spot reelle.
 - BESS simplifie (SoC deterministe, sans optimisation economique).
-- Cohérence regime/prix = score de validation, pas preuve causale.
+- Coherence regime/prix = score de validation, pas preuve causale.
 
 ## Run
 ```bash

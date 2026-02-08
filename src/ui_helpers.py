@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 import streamlit as st
 
 from src.state_adapter import normalize_metrics_record, normalize_state_metrics as _normalize_state_metrics
@@ -9,49 +11,70 @@ from src.state_adapter import normalize_metrics_record, normalize_state_metrics 
 
 GLOBAL_CSS = """
 <style>
-    h1 { font-size: 1.85rem !important; font-weight: 700 !important; color: #1b2a4a !important; }
-    h2 { font-size: 1.35rem !important; font-weight: 650 !important; color: #1b2a4a !important; }
-    h3 { font-size: 1.15rem !important; font-weight: 650 !important; color: #2c3e6b !important; }
-
-    .block-container { padding-top: 1.8rem; padding-bottom: 1.8rem; }
-    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+    h1 { font-size: 1.86rem !important; font-weight: 700 !important; color: #1b2a4a !important; letter-spacing: 0.1px; }
+    h2 { font-size: 1.38rem !important; font-weight: 650 !important; color: #1b2a4a !important; letter-spacing: 0.1px; }
+    h3 { font-size: 1.16rem !important; font-weight: 650 !important; color: #2c3e6b !important; letter-spacing: 0.1px; }
+    .block-container { padding-top: 1.7rem; padding-bottom: 1.9rem; max-width: 1320px; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1.25rem; }
 
     [data-testid="stMetric"] {
-        background: #f0f4fa;
-        border-radius: 10px;
+        background: linear-gradient(180deg, #f0f4fa 0%, #f6f8fc 100%);
+        border-radius: 11px;
         padding: 12px 16px;
+        border: 1px solid #d6e4f0;
         border-left: 4px solid #0066cc;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
     }
+    [data-testid="stDataFrame"] { font-size: 0.86rem; }
 
     .info-card {
-        background: #f0f4fa;
+        background: linear-gradient(180deg, #f0f4fa 0%, #f6f8fc 100%);
         border-radius: 10px;
         padding: 1rem 1.1rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.95rem;
         border: 1px solid #d6e4f0;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
     }
-    .info-card h4 { margin-top: 0; color: #0066cc; font-size: 0.95rem; }
-    .info-card p { margin-bottom: 0.2rem; color: #3a4a6b; font-size: 0.88rem; }
+    .info-card h4 { margin-top: 0; margin-bottom: 0.45rem; color: #005bb2; font-size: 0.95rem; }
+    .info-card p { margin-bottom: 0.1rem; color: #334155; font-size: 0.89rem; line-height: 1.45; }
 
     .narrative-box {
         background: #ebf5fb;
         border-left: 4px solid #0066cc;
         border-radius: 0 8px 8px 0;
-        padding: 0.8rem 1rem;
-        margin: 0.5rem 0 1rem 0;
-        font-size: 0.9rem;
-        color: #2c3e50;
+        padding: 0.82rem 1rem;
+        margin: 0.45rem 0 1rem 0;
+        font-size: 0.91rem;
+        color: #1f3a56;
         line-height: 1.5;
     }
 
-    .commentary-box {
+    .commentary-box-analysis {
         background: #f8fafc;
         border-left: 4px solid #0f766e;
         border-radius: 0 8px 8px 0;
-        padding: 0.8rem 1rem;
-        margin: 0.4rem 0 1rem 0;
+        padding: 0.86rem 1.02rem;
+        margin: 0.44rem 0 1rem 0;
         color: #1f2937;
-        line-height: 1.45;
+        line-height: 1.5;
+    }
+    .commentary-box-method {
+        background: #eef6ff;
+        border-left: 4px solid #1d4ed8;
+        border-radius: 0 8px 8px 0;
+        padding: 0.86rem 1.02rem;
+        margin: 0.44rem 0 1rem 0;
+        color: #1e3a8a;
+        line-height: 1.5;
+    }
+    .commentary-box-warning {
+        background: #fff7ed;
+        border-left: 4px solid #ea580c;
+        border-radius: 0 8px 8px 0;
+        padding: 0.86rem 1.02rem;
+        margin: 0.44rem 0 1rem 0;
+        color: #7c2d12;
+        line-height: 1.5;
     }
 
     .guard-message {
@@ -67,10 +90,10 @@ GLOBAL_CSS = """
     .question-banner {
         background: #0066cc;
         color: white;
-        padding: 0.8rem 1.2rem;
+        padding: 0.82rem 1.16rem;
         border-radius: 8px;
         margin-bottom: 1rem;
-        font-size: 1.05rem;
+        font-size: 1.03rem;
         font-weight: 620;
     }
 
@@ -100,9 +123,22 @@ GLOBAL_CSS = """
         border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
         margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #3e2723; line-height: 1.5;
     }
-    .challenge-block strong { color: #e65100; }
+    .challenge-block strong { color: #b54708; }
 
-    [data-testid="stDataFrame"] { font-size: 0.86rem; }
+    .kpi-banner {
+        border-radius: 12px;
+        border: 1px solid #d6e4f0;
+        padding: 0.8rem 1rem 0.7rem 1rem;
+        margin: 0.3rem 0 0.9rem 0;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    .kpi-banner-strong { background: linear-gradient(180deg, #ecfdf3 0%, #f4fff8 100%); border-left: 4px solid #15803d; }
+    .kpi-banner-medium { background: linear-gradient(180deg, #eff6ff 0%, #f7fbff 100%); border-left: 4px solid #1d4ed8; }
+    .kpi-banner-weak { background: linear-gradient(180deg, #fff7ed 0%, #fffaf3 100%); border-left: 4px solid #ea580c; }
+    .kpi-banner-unknown { background: linear-gradient(180deg, #f8fafc 0%, #fbfdff 100%); border-left: 4px solid #64748b; }
+    .kpi-banner .label { font-size: 0.84rem; color: #475569; font-weight: 620; letter-spacing: 0.08px; }
+    .kpi-banner .value { font-size: 1.55rem; color: #0f172a; font-weight: 720; line-height: 1.18; margin-top: 0.08rem; }
+    .kpi-banner .subtitle { font-size: 0.83rem; color: #334155; margin-top: 0.18rem; line-height: 1.35; }
 </style>
 """
 
@@ -138,8 +174,8 @@ def section(title: str, subtitle: str | None = None) -> None:
 def info_card(title: str, body: str) -> None:
     st.markdown(
         f"""<div class="info-card">
-        <h4>{title}</h4>
-        <p>{body}</p>
+        <h4>{html.escape(title)}</h4>
+        <p>{html.escape(body)}</p>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -149,8 +185,27 @@ def narrative(text: str) -> None:
     st.markdown(f'<div class="narrative-box">{text}</div>', unsafe_allow_html=True)
 
 
-def render_commentary(md_text: str) -> None:
-    st.markdown(f'<div class="commentary-box">{md_text}</div>', unsafe_allow_html=True)
+def render_commentary(md_text: str, variant: str = "analysis") -> None:
+    css = {
+        "analysis": "commentary-box-analysis",
+        "method": "commentary-box-method",
+        "warning": "commentary-box-warning",
+    }.get(variant, "commentary-box-analysis")
+    st.markdown(f'<div class="{css}">{md_text}</div>', unsafe_allow_html=True)
+
+
+def render_kpi_banner(title: str, value: str, subtitle: str = "", status: str = "unknown") -> None:
+    safe_status = status if status in {"strong", "medium", "weak", "unknown"} else "unknown"
+    st.markdown(
+        f"""
+        <div class="kpi-banner kpi-banner-{safe_status}">
+            <div class="label">{html.escape(title)}</div>
+            <div class="value">{html.escape(value)}</div>
+            <div class="subtitle">{html.escape(subtitle)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def question_banner(text: str) -> None:
@@ -165,8 +220,8 @@ def dynamic_narrative(text: str, severity: str = "info") -> None:
 def challenge_block(title: str, body: str) -> None:
     st.markdown(
         f"""<div class="challenge-block">
-        <strong>{title}</strong><br>
-        <span>{body}</span>
+        <strong>{html.escape(title)}</strong><br>
+        <span>{html.escape(body)}</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -184,9 +239,11 @@ __all__ = [
     "info_card",
     "narrative",
     "render_commentary",
+    "render_kpi_banner",
     "question_banner",
     "dynamic_narrative",
     "challenge_block",
     "normalize_metrics_record",
     "normalize_state_metrics",
 ]
+

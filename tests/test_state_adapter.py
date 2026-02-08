@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.state_adapter import ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
+from src.state_adapter import (
+    coerce_numeric_columns,
+    ensure_plot_columns,
+    metrics_to_dataframe,
+    normalize_metrics_record,
+)
 
 
 def test_normalize_metrics_record_maps_legacy_keys() -> None:
@@ -50,8 +55,19 @@ def test_metrics_to_dataframe_builds_phase_and_filters_price_mode() -> None:
 def test_ensure_plot_columns_adds_missing_with_nan() -> None:
     df = pd.DataFrame({"a": [1, 2]})
 
-    out = ensure_plot_columns(df, ["a", "b", "c"])
+    out = ensure_plot_columns(df, ["a", "b", "c"], with_notice=True)
 
     assert list(out.columns) == ["a", "b", "c"]
     assert out["b"].isna().all()
     assert out["c"].isna().all()
+    assert out.attrs["_missing_plot_columns"] == ["b", "c"]
+
+
+def test_coerce_numeric_columns_handles_invalid_values() -> None:
+    df = pd.DataFrame({"a": ["1", "x"], "b": [2, 3], "c": ["4.5", None]})
+
+    out = coerce_numeric_columns(df, ["a", "c"])
+
+    assert np.isclose(out.loc[0, "a"], 1.0)
+    assert np.isnan(out.loc[1, "a"])
+    assert np.isclose(out.loc[0, "c"], 4.5)

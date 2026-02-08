@@ -55,13 +55,33 @@ def normalize_metrics_record(m: Mapping | None) -> dict:
     return out
 
 
-def ensure_plot_columns(df: pd.DataFrame, required_cols: Sequence[str]) -> pd.DataFrame:
-    """Guarantee required plotting columns exist, filling missing with NaN."""
+def ensure_plot_columns(
+    df: pd.DataFrame, required_cols: Sequence[str], with_notice: bool = False
+) -> pd.DataFrame:
+    """Guarantee required plotting columns exist, filling missing with NaN.
+
+    If ``with_notice=True``, a list of inserted columns is stored in
+    ``out.attrs["_missing_plot_columns"]`` for UI diagnostics.
+    """
 
     out = df.copy()
+    missing: list[str] = []
     for col in required_cols:
         if col not in out.columns:
             out[col] = np.nan
+            missing.append(col)
+    if with_notice:
+        out.attrs["_missing_plot_columns"] = missing
+    return out
+
+
+def coerce_numeric_columns(df: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
+    """Safely coerce selected columns to numeric for plotting robustness."""
+
+    out = df.copy()
+    for col in cols:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
     return out
 
 

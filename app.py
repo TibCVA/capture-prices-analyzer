@@ -93,6 +93,11 @@ def _metrics_schema_ok(metrics: dict | None) -> bool:
     return _REQUIRED_METRICS_KEYS.issubset(set(normalized.keys()))
 
 
+def _metrics_df_schema_ok(df: pd.DataFrame) -> bool:
+    required = {"country", "year"}
+    return required.issubset(set(df.columns))
+
+
 def _runtime_overrides(s: dict) -> dict:
     raw = s.get("ui_overrides", {})
     if not isinstance(raw, dict):
@@ -304,9 +309,34 @@ if not state["data_loaded"]:
     st.stop()
 
 metrics_df = metrics_to_dataframe(state, state["price_mode"])
-if metrics_df.empty:
+if metrics_df.empty or not _metrics_df_schema_ok(metrics_df):
     st.info("Aucune metrique disponible pour les filtres actifs.")
     st.stop()
+    # Bare-mode fallback: `st.stop()` may not interrupt plain Python imports.
+    metrics_df = pd.DataFrame(
+        [
+            {
+                "country": "N/A",
+                "year": 0,
+                "sr": float("nan"),
+                "far": float("nan"),
+                "ir": float("nan"),
+                "ttl": float("nan"),
+                "capture_ratio_pv": float("nan"),
+                "h_negative_obs": float("nan"),
+                "phase": "unknown",
+                "regime_coherence": float("nan"),
+            }
+        ]
+    )
+
+active_overrides = _runtime_overrides(state)
+if active_overrides:
+    dynamic_narrative(
+        f"Hypotheses personnalisees actives ({len(active_overrides)}). "
+        "Les resultats affiches incluent ces overrides et restent comparables uniquement dans ce meme cadre.",
+        severity="warning",
+    )
 
 selected_country = st.selectbox(
     "Pays dashboard",
