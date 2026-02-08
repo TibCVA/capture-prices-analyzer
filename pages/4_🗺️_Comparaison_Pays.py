@@ -12,6 +12,8 @@ import streamlit as st
 
 from src.commentary_bridge import so_what_block
 from src.export_utils import export_to_excel, export_to_gsheets
+from src.phase_context import compute_h_negative_declining_flags
+from src.phase_diagnostics import diagnose_phase
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
 from src.ui_helpers import (
     guard_no_data,
@@ -27,10 +29,17 @@ st.set_page_config(page_title="Comparaison pays", page_icon="🌍", layout="wide
 inject_global_css()
 st.title("🗺️ Comparaison Pays")
 
+PHASE_ORDER = ["stage_1", "stage_2", "stage_3", "stage_4", "unknown"]
+
+
+def _canonical_phase(value) -> str:
+    s = str(value).strip().lower()
+    return s if s in set(PHASE_ORDER) else "unknown"
+
 
 def _phase_order_value(phase: str) -> int:
     mapping = {"stage_1": 1, "stage_2": 2, "stage_3": 3, "stage_4": 4}
-    return mapping.get(str(phase), 0)
+    return mapping.get(_canonical_phase(phase), 0)
 
 
 def _phase_from_value(value: int) -> str:
@@ -51,6 +60,35 @@ def _smooth_phase_latest(df_hist: pd.DataFrame, country: str, year: int) -> str:
     return _phase_from_value(med)
 
 
+def _recompute_phase_context(df_hist: pd.DataFrame, thresholds: dict) -> pd.DataFrame:
+    out = df_hist.copy()
+    required = {"country", "year", "h_negative_obs"}
+    if not required.issubset(set(out.columns)):
+        return out
+
+    out = out.drop(columns=["h_negative_declining"], errors="ignore")
+    ctx = compute_h_negative_declining_flags(out[["country", "year", "h_negative_obs"]])
+    out = out.merge(ctx, on=["country", "year"], how="left")
+    out["h_negative_declining"] = out["h_negative_declining"].astype("boolean").fillna(False).astype(bool)
+
+    phases: list[str] = []
+    confidences: list[float] = []
+    scores: list[float] = []
+    blocked: list[str] = []
+    for _, row in out.iterrows():
+        diag = diagnose_phase(row.to_dict(), thresholds)
+        phases.append(_canonical_phase(diag.get("phase", "unknown")))
+        confidences.append(float(diag.get("confidence", np.nan)))
+        scores.append(float(diag.get("score", np.nan)))
+        blocked.append("; ".join(diag.get("blocked_rules", [])))
+
+    out["phase"] = phases
+    out["phase_confidence"] = confidences
+    out["phase_score"] = scores
+    out["phase_blocked_rules"] = blocked
+    return out
+
+
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Comparaison pays")
@@ -59,6 +97,7 @@ normalize_state_metrics(state)
 df_all = metrics_to_dataframe(state, state.get("price_mode"))
 if df_all.empty or "country" not in df_all.columns:
     guard_no_data("la page Comparaison pays")
+df_all = _recompute_phase_context(df_all, state.get("thresholds", {}))
 
 years = sorted(df_all["year"].dropna().unique())
 year = st.selectbox("Année", years, index=len(years) - 1)
@@ -245,16 +284,19 @@ render_commentary(
 
 section_header("Comparaison phase vs TTL", "Phase annuelle (non monotone) et queue haute")
 phase_df = df.copy()
-phase_df["phase_officielle"] = phase_df["phase"].fillna("unknown")
+phase_df["phase_officielle"] = phase_df["phase"].apply(_canonical_phase)
 phase_df["phase_affichee"] = phase_df["phase_officielle"]
 if show_smoothed_phase:
-    phase_df["phase_affichee"] = phase_df["country"].apply(lambda c: _smooth_phase_latest(df_all, c, int(year)))
+    phase_df["phase_affichee"] = phase_df["country"].apply(
+        lambda c: _canonical_phase(_smooth_phase_latest(df_all, c, int(year)))
+    )
 
 fig3 = px.bar(
     phase_df.sort_values("ttl", ascending=False),
     x="country",
     y="ttl",
     color="phase_affichee",
+    category_orders={"phase_affichee": PHASE_ORDER},
     color_discrete_map=PHASE_COLORS,
     hover_data=["phase_officielle", "phase_confidence", "phase_score", "phase_blocked_rules", "sr", "far", "ir", "capture_ratio_pv"],
 )
