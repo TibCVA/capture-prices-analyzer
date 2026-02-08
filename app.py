@@ -14,6 +14,7 @@ from src.config_loader import load_countries_config, load_scenarios, load_thresh
 import src.data_loader as _data_loader
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
+from src.phase_context import compute_h_negative_declining_flags
 from src.phase_diagnostics import diagnose_phase
 from src.state_adapter import metrics_to_dataframe, normalize_metrics_record, normalize_state_metrics
 from src.ui_helpers import dynamic_narrative, info_card, inject_global_css, narrative, render_commentary, section_header
@@ -256,7 +257,44 @@ def _load_selected_data(s: dict) -> bool:
             if len(uniq) > 20:
                 st.caption(f"... {len(uniq) - 20} erreurs supplementaires non affichees")
 
+    if success > 0:
+        _refresh_phase_context(s)
+
     return success > 0
+
+
+def _refresh_phase_context(s: dict) -> None:
+    """Recompute phase diagnostics with h_negative trend context for UI consistency."""
+
+    mdf = metrics_to_dataframe(s, s.get("price_mode"))
+    if mdf.empty:
+        return
+
+    required = {"country", "year", "h_negative_obs"}
+    if not required.issubset(set(mdf.columns)):
+        return
+
+    try:
+        flags = compute_h_negative_declining_flags(mdf[["country", "year", "h_negative_obs"]])
+    except Exception:
+        return
+
+    flags_map = {
+        (str(r["country"]), int(r["year"])): bool(r["h_negative_declining"])
+        for _, r in flags.iterrows()
+    }
+
+    metrics_store = s.get("metrics", {})
+    for key, metrics in list(metrics_store.items()):
+        if not (isinstance(key, tuple) and len(key) >= 3 and isinstance(metrics, dict)):
+            continue
+        country, year, mode = key[0], key[1], key[2]
+        if mode != s.get("price_mode"):
+            continue
+        flag = flags_map.get((str(country), int(year)), False)
+        metrics["h_negative_declining"] = bool(flag)
+        diag = diagnose_phase(metrics, s["thresholds"])
+        s["diagnostics"][(country, year)] = diag
 
 
 _init_state()
@@ -271,6 +309,8 @@ state["scenarios"] = scenarios
 state["commodities"] = commodities
 
 normalize_state_metrics(state)
+if state.get("data_loaded"):
+    _refresh_phase_context(state)
 all_countries = sorted([k for k in countries_cfg.keys() if not k.startswith("__")])
 country_labels = {c: countries_cfg[c].get("name", c) for c in all_countries}
 

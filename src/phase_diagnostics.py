@@ -52,9 +52,14 @@ def _score_stage_2(m: dict, t: dict, rules: list[str]) -> int:
     return score
 
 
-def _score_stage_3(m: dict, t: dict, rules: list[str]) -> int:
+def _score_stage_3(m: dict, t: dict, rules: list[str], blocked_rules: list[str]) -> int:
     far = m.get("far")
     if not _is_finite(far):
+        return 0
+
+    require_declining = bool(t.get("require_h_neg_declining", False))
+    if require_declining and m.get("h_negative_declining") is not True:
+        blocked_rules.append("stage_3:require_h_neg_declining")
         return 0
 
     score = 0
@@ -64,9 +69,6 @@ def _score_stage_3(m: dict, t: dict, rules: list[str]) -> int:
     if far >= t["far_strong"]:
         score += 2
         rules.append("stage_3:far_strong")
-
-    # require_h_neg_declining cannot be evaluated from annual single-point metrics.
-    # It is intentionally omitted here and should be fed by caller if desired.
     return score
 
 
@@ -131,10 +133,11 @@ def diagnose_phase(metrics: dict, thresholds: dict) -> dict:
     rules_2: list[str] = []
     rules_3: list[str] = []
     rules_4: list[str] = []
+    blocked_rules: list[str] = []
 
     s1 = _score_stage_1(metrics, phase_cfg["stage_1"], rules_1)
     s2 = _score_stage_2(metrics, phase_cfg["stage_2"], rules_2)
-    s3 = _score_stage_3(metrics, phase_cfg["stage_3"], rules_3)
+    s3 = _score_stage_3(metrics, phase_cfg["stage_3"], rules_3, blocked_rules)
     s4 = _score_stage_4(metrics, phase_cfg["stage_4"], rules_4)
 
     far = metrics.get("far")
@@ -200,5 +203,6 @@ def diagnose_phase(metrics: dict, thresholds: dict) -> dict:
         "score": int(best_score),
         "confidence": float(confidence),
         "matched_rules": matched,
+        "blocked_rules": blocked_rules,
         "alerts": alerts,
     }

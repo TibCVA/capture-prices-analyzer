@@ -191,7 +191,7 @@ def test_app_and_pages_smoke() -> None:
 
 
 def test_excesum_static_page_shows_quality_sections() -> None:
-    page = Path("pages/9_🧾_ExceSum_des_conclusions.py")
+    page = Path("pages/9_\U0001F9FE_ExceSum_des_conclusions.py")
     at = AppTest.from_file(str(page))
     at.run(timeout=30)
     assert not at.exception, f"Unexpected exception in {page}: {at.exception}"

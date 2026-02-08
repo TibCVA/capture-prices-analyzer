@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 from src.ui_helpers import (
@@ -20,15 +19,11 @@ from src.ui_helpers import (
     render_kpi_banner,
     section_header,
 )
-from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
-
+from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS, PHASE_COLORS
 
 st.set_page_config(page_title="ExceSum des conclusions", page_icon="🧾", layout="wide")
 inject_global_css()
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
 
 def _load_static_payload() -> dict:
     path = Path("docs") / "EXCESUM_STATIC_REPORT.json"
@@ -46,14 +41,22 @@ def _safe_df(payload: dict, key: str) -> pd.DataFrame:
 
 
 def _sf(v, fmt=".4f") -> str:
-    """Safe format a numeric value."""
     try:
         f = float(v)
-        if not np.isfinite(f):
-            return "n/a"
-        return f"{f:{fmt}}"
     except Exception:
         return "n/a"
+    if not np.isfinite(f):
+        return "n/a"
+    return f"{f:{fmt}}"
+
+
+def _phase_distribution_text(df_latest: pd.DataFrame) -> str:
+    if df_latest.empty or "phase" not in df_latest.columns:
+        return "distribution indisponible"
+    counts = df_latest["phase"].fillna("unknown").value_counts(dropna=False).to_dict()
+    order = ["stage_1", "stage_2", "stage_3", "stage_4", "unknown"]
+    chunks = [f"{k}={int(counts.get(k, 0))}" for k in order if k in counts or k == "unknown"]
+    return ", ".join(chunks)
 
 
 payload = _load_static_payload()
@@ -61,8 +64,7 @@ meta = payload.get("meta", {})
 baseline = meta.get("baseline", {})
 global_medians = payload.get("global_medians", {})
 rebuild_matrix = payload.get("rebuild_matrix", {})
-by_country = payload.get("by_country_means", [])
-latest_year = payload.get("latest_year", [])
+latest_year_rows = payload.get("latest_year", [])
 
 df_q1_detail = _safe_df(payload, "q1_detail")
 df_q1_country = _safe_df(payload, "q1_country")
@@ -74,387 +76,221 @@ df_q6 = _safe_df(payload, "q6_scope")
 df_country = _safe_df(payload, "country_conclusions")
 df_annex = _safe_df(payload, "metrics_annex")
 df_quality = _safe_df(payload, "data_quality_flags")
-df_verification = _safe_df({"x": meta.get("verification", [])}, "x")
-
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
+df_verification = _safe_df({"rows": meta.get("verification", [])}, "rows")
+df_latest = pd.DataFrame(latest_year_rows) if isinstance(latest_year_rows, list) else pd.DataFrame()
 
 st.title("ExceSum des conclusions")
-st.caption(
-    "Rapport statique fige sur baseline unique. "
-    "Aucun recalcul n'est execute a l'ouverture."
-)
+st.caption("Rapport statique figé sur baseline unique (aucun recalcul à l'ouverture).")
 
 narrative(
-    "Cette page est une synthese executive statique, fondee sur un jeu de resultats fixe "
-    "et reproductible. Toutes les valeurs sont tracees vers le JSON source "
+    "Cette page synthétise les résultats d'une baseline fixe et traçable. "
+    "Toutes les conclusions ci-dessous sont générées depuis les tableaux du fichier "
     "<code>docs/EXCESUM_STATIC_REPORT.json</code>."
 )
 
-# --- KPI banner row ---
+# KPI header
 cols = st.columns(5)
 cols[0].metric("Pays", len(baseline.get("countries", [])))
 years = baseline.get("years", [2015, 2024])
-cols[1].metric("Periode", f"{years[0]}-{years[-1]}")
+cols[1].metric("Période", f"{years[0]}-{years[-1]}")
 n_pairs = int(rebuild_matrix.get("pairs_total", len(df_annex)))
-cols[2].metric("Couples pays-annee", n_pairs)
+cols[2].metric("Couples pays-année", n_pairs)
 n_ha = int(rebuild_matrix.get("pairs_h_regime_a_gt_0", 0))
 cols[3].metric("h_regime_a > 0", f"{n_ha}/{n_pairs}")
-cols[4].metric("Coherence regime/prix", f"{100 * global_medians.get('regime_coherence', 0):.1f}%")
+cols[4].metric("Cohérence régime/prix", f"{100 * global_medians.get('regime_coherence', 0):.1f}%")
 
-# --- Global synthesis ---
-section_header("Synthese globale", "Medianes panel 5 pays x 10 ans (2015-2024)")
-
+section_header("Synthèse globale", "Médianes panel 5 pays x 10 ans (2015-2024)")
 narrative(
-    "L'ensemble du panel se situe en debut de phase 2 en 2024. "
-    "Le surplus structurel (SR) reste tres faible en mediane, mais la degradation du capture ratio PV "
-    "est significative dans 4 pays sur 5. "
-    "La flex domestique (PSH + BESS, hors exports) n'absorbe pas la totalite du surplus dans les pays a fort VRE : "
-    f"{n_ha} couples sur {n_pairs} presentent des heures en regime A (surplus non absorbe)."
+    "Distribution des phases en 2024: "
+    f"{_phase_distribution_text(df_latest)}. "
+    "La phase est une classification annuelle, non monotone: un pays peut évoluer "
+    "d'une année à l'autre selon FAR, heures négatives, capture ratio et spreads."
+)
+dynamic_narrative(
+    "Important: la narration ExceSum est alignée automatiquement sur les tables source. "
+    "Aucun texte de phase n'est hardcodé.",
+    severity="info",
 )
 
 kpi_cols = st.columns(4)
 with kpi_cols[0]:
-    render_kpi_banner("SR median", _sf(global_medians.get("sr"), ".4f"),
-                      "Surplus structurel tres faible", "medium")
+    render_kpi_banner("SR médian", _sf(global_medians.get("sr"), ".4f"), "Surplus structurel", "medium")
 with kpi_cols[1]:
-    far_med = global_medians.get("far", 0)
-    render_kpi_banner("FAR median", _sf(far_med, ".3f"),
-                      "Absorption domestique elevee en mediane", "strong" if far_med > 0.95 else "medium")
-with kpi_cols[2]:
-    render_kpi_banner("IR median", _sf(global_medians.get("ir"), ".3f"),
-                      "Part must-run / charge P10", "medium")
-with kpi_cols[3]:
-    render_kpi_banner("TTL median", f"{_sf(global_medians.get('ttl'), '.1f')} EUR/MWh",
-                      "Ancre thermique longue duree", "medium")
-
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
-tabs = st.tabs([
-    "Methode",
-    "Q1 - Seuils stage_2",
-    "Q2 - Pentes CR_PV",
-    "Q3 - Transition 2->3",
-    "Q4 - Batteries",
-    "Q5 - Commodites",
-    "Q6 - Chaleur/froid",
-    "Conclusions pays",
-    "Annexes",
-])
-
-# ===== TAB 0 : METHODE =====
-with tabs[0]:
-    section_header("Conventions methodologiques")
-    narrative(
-        "Ce rapport utilise une baseline unique : 5 pays (FR, DE, ES, PL, DK) x 10 ans (2015-2024), "
-        "modes observed/observed/observed. L'annee 2022 (crise energetique) est exclue des regressions Q2."
+    far_med = float(global_medians.get("far", np.nan))
+    render_kpi_banner(
+        "FAR médian",
+        _sf(far_med, ".3f"),
+        "Absorption du surplus",
+        "strong" if np.isfinite(far_med) and far_med > 0.95 else "medium",
     )
+with kpi_cols[2]:
+    render_kpi_banner("IR médian", _sf(global_medians.get("ir"), ".3f"), "Rigidité", "medium")
+with kpi_cols[3]:
+    render_kpi_banner("TTL médian", f"{_sf(global_medians.get('ttl'), '.1f')} EUR/MWh", "Queue haute", "medium")
 
-    st.markdown("""
-**Seuils stage_2** (page 0, etape 7) :
-- `h_negative_obs >= 200` (+1 pt), `>= 300` (+2 pts)
-- `h_below_5_obs >= 500` (+1 pt)
-- `capture_ratio_pv <= 0.80` (+1 pt), `<= 0.70` (+2 pts)
+tabs = st.tabs(
+    [
+        "Méthode",
+        "Q1 - Seuils stage_2",
+        "Q2 - Pentes CR_PV",
+        "Q3 - Transition 2→3",
+        "Q4 - Batteries",
+        "Q5 - Commodités",
+        "Q6 - Chaleur/froid",
+        "Conclusions pays",
+        "Annexes",
+    ]
+)
 
-**Seuil de significativite des pentes Q2** : p-value <= 0.05. Au-dessus : "fragile".
+with tabs[0]:
+    section_header("Conventions méthodologiques")
+    narrative(
+        "Baseline unique: FR/DE/ES/PL/DK, période 2015-2024, modes observed/observed/observed. "
+        "L'année 2022 est exclue des pentes Q2."
+    )
+    st.markdown(
+        """
+**Règles de phase (extrait)**:
+- Stage 2: seuils sur `h_negative_obs`, `h_below_5_obs`, `capture_ratio_pv`, `days_spread_above_50_obs`
+- Stage 3: FAR élevé + condition `require_h_neg_declining=true`
+- Stage 4: FAR élevé + plafond sur `h_regime_c`
 
-**Seuil FAR pour transition Q3** : FAR >= 0.60 (+ tendance h_neg declinante).
+**Lecture correcte des phases**:
+- La phase est annuelle.
+- Elle n'est pas un état irréversible.
+- ExceSum et les pages UI doivent partager exactement la même logique.
 
-**Outlier exclu** : 2022 (crise energetique, prix hors normes).
-
-**Flex domestique** : PSH + BESS (hors exports/net_position). Les exports ne sont pas comptes
-comme de la flexibilite domestique car ils dependent de la capacite d'interconnexion des voisins.
-""")
-
-    section_header("Controle qualite et verifications")
+**Modèle flex (observed)**:
+- `sink_non_bess = PSH_pumping + net_position positive (exports)`
+- Le modèle actuel inclut donc les exports dans la flex observée.
+"""
+    )
+    section_header("Contrôle qualité")
     if not df_verification.empty:
         st.dataframe(df_verification, use_container_width=True, hide_index=True)
-
     if rebuild_matrix:
-        rm = rebuild_matrix
-        st.markdown(f"""
-**Rebuild matrix** : {rm.get('pairs_total', '?')} couples recalcules,
-{rm.get('pairs_h_regime_a_gt_0', 0)} avec h_regime_a > 0,
-{rm.get('cache_semantic_invalid_pairs', 0)} caches invalides corriges.
-Phases : stage_1={rm.get('phase_distribution', {}).get('stage_1', '?')},
-stage_2={rm.get('phase_distribution', {}).get('stage_2', '?')},
-stage_3={rm.get('phase_distribution', {}).get('stage_3', '?')}.
-""")
+        st.markdown(
+            f"""
+**Rebuild matrix**: {rebuild_matrix.get('pairs_total', '?')} couples,
+{rebuild_matrix.get('pairs_h_regime_a_gt_0', 0)} avec `h_regime_a > 0`,
+{rebuild_matrix.get('cache_semantic_invalid_pairs', 0)} caches invalides corrigés.
+"""
+        )
 
-
-# ===== TAB 1 : Q1 =====
 with tabs[1]:
-    question_banner("Q1 - A quels niveaux observe-t-on la bascule vers stage_2 ?")
-
+    question_banner("Q1 - À quels niveaux observe-t-on la bascule vers stage_2 ?")
     dynamic_narrative(
-        "Reponse courte : la bascule vers stage_2 apparait quand h_negative_obs, h_below_5_obs "
-        "et capture_ratio_pv franchissent simultanement leurs seuils respectifs "
-        "(h_neg >= 200, h_below_5 >= 500, CR_PV <= 0.80).",
+        "Réponse courte: la bascule vers stage_2 apparaît quand les trois signaux "
+        "(`h_negative_obs`, `h_below_5_obs`, `capture_ratio_pv`) franchissent les seuils.",
         severity="info",
     )
-
-    narrative(
-        "Le graphique ci-dessous montre l'evolution de chaque pays dans l'espace "
-        "(h_negative_obs, capture_ratio_pv). Les lignes de seuil indiquent les zones de bascule. "
-        "Un pays qui traverse les deux lignes simultanement entre en zone stage_2."
-    )
-
     if not df_q1_detail.empty:
-        st.caption("Scatter : capture_ratio_pv vs h_negative_obs par pays et annee (2015-2024)")
-        fig_q1 = px.scatter(
+        fig = px.scatter(
             df_q1_detail,
             x="h_negative_obs",
             y="capture_ratio_pv",
             color="country",
+            hover_data=["year", "h_below_5_obs", "sr"],
             color_discrete_map=COUNTRY_PALETTE,
-            hover_data=["year", "sr", "h_below_5_obs"],
-            opacity=0.5,
+            opacity=0.55,
         )
-        fig_q1.add_hline(y=0.80, line_dash="dash", line_color="#94a3b8",
-                         annotation_text="CR_PV=0.80", annotation_position="top left")
-        fig_q1.add_vline(x=200, line_dash="dash", line_color="#94a3b8",
-                         annotation_text="h_neg=200", annotation_position="top right")
-        fig_q1.update_layout(
-            height=480,
-            xaxis_title="Heures negatives observees",
-            yaxis_title="Capture ratio PV",
-            **PLOTLY_LAYOUT_DEFAULTS,
-        )
-        fig_q1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
-        fig_q1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-        st.plotly_chart(fig_q1, use_container_width=True)
-
+        fig.add_hline(y=0.80, line_dash="dash", line_color="#94a3b8")
+        fig.add_vline(x=200, line_dash="dash", line_color="#94a3b8")
+        fig.update_layout(height=470, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
     if not df_q1_country.empty:
-        section_header("Resume par pays")
-        for _, row in df_q1_country.iterrows():
-            c = row["country"]
-            first_yr = row.get("first_stage2_cross_year")
-            crossed = row.get("latest_cross_all", False)
-            yr_str = f"{int(first_yr)}" if pd.notna(first_yr) else "jamais"
-            status = "Franchi" if crossed else "Non franchi"
-            st.markdown(
-                f"- **{c}** : premier franchissement simultane = **{yr_str}** | "
-                f"2024 = **{status}** | CR_PV = {_sf(row.get('latest_capture_ratio_pv'), '.3f')} | "
-                f"h_neg = {_sf(row.get('latest_h_negative_obs'), '.0f')}"
-            )
+        st.dataframe(df_q1_country, use_container_width=True, hide_index=True)
 
-        challenge_block(
-            "PL : seuils non franchis simultanement",
-            "La Pologne ne franchit pas les 3 seuils en meme temps sur la periode 2015-2024. "
-            "Seul le capture_ratio_pv passe sous 0.80 en 2024, mais h_neg (197) reste sous 200 et "
-            "h_below_5 (350) reste sous 500.",
-        )
-
-
-# ===== TAB 2 : Q2 =====
 with tabs[2]:
-    question_banner("Q2 - Quelle est la pente de degradation du capture ratio PV en phase 2 ?")
-
+    question_banner("Q2 - Quelle est la pente de capture ratio PV vs pénétration PV ?")
     dynamic_narrative(
-        "Reponse courte : la pente mesure la variation du capture_ratio_pv par point de pourcentage "
-        "de penetration PV (regression lineaire, hors 2022). Une pente de -0.07 signifie que chaque "
-        "point supplementaire de PV dans le mix fait baisser le capture ratio de 7 points de base.",
+        "Réponse courte: la pente est estimée par régression linéaire (hors 2022). "
+        "Le signe et la p-value indiquent direction et robustesse.",
         severity="info",
     )
-
     if not df_q2.empty:
-        # Map JSON "forte" → "significatif" for consistency with page 6
-        df_q2_display = df_q2.copy().sort_values("slope")
-        if "robustesse" in df_q2_display.columns:
-            df_q2_display["robustesse"] = df_q2_display["robustesse"].replace(
-                {"forte": "significatif"}
-            )
-
-        st.caption("Pentes capture_ratio_pv vs penetration PV par pays (hors 2022)")
-        color_map = {"significatif": "#16a34a", "fragile": "#f59e0b"}
-        fig_q2 = px.bar(
-            df_q2_display,
+        fig = px.bar(
+            df_q2.sort_values("slope"),
             x="country",
             y="slope",
             color="robustesse",
-            color_discrete_map=color_map,
             hover_data=["r_squared", "p_value", "n_points"],
         )
-        fig_q2.add_hline(y=0.0, line_dash="dash", line_color="#64748b")
-        fig_q2.update_layout(
-            height=420,
-            xaxis_title="Pays",
-            yaxis_title="Pente (variation CR_PV / pp penetration PV)",
-            **PLOTLY_LAYOUT_DEFAULTS,
-        )
-        fig_q2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
-        fig_q2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-        st.plotly_chart(fig_q2, use_container_width=True)
+        fig.add_hline(y=0.0, line_dash="dash", line_color="#64748b")
+        fig.update_layout(height=430, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df_q2, use_container_width=True, hide_index=True)
 
-        narrative(
-            "**Lecture comparative** : FR presente la degradation la plus rapide "
-            f"(pente = {_sf(df_q2_display[df_q2_display['country'] == 'FR']['slope'].iloc[0] if len(df_q2_display[df_q2_display['country'] == 'FR']) > 0 else float('nan'), '.4f')}), "
-            "suivie de DE, DK et PL. ES affiche la pente la plus lente. "
-            "4 pays sur 5 sont significatifs a p <= 0.05. "
-            "PL est fragile (n=4 points seulement, p=0.095) : la tendance est suggestive mais non confirmee."
-        )
-
-
-# ===== TAB 3 : Q3 =====
 with tabs[3]:
-    question_banner("Q3 - Quelles conditions marquent le passage stage_2 -> stage_3 ?")
-
+    question_banner("Q3 - Conditions de transition stage_2 → stage_3")
     dynamic_narrative(
-        "Reponse courte : le passage vers stage_3 exige un FAR durablement eleve (>= 0.60) "
-        "et une detente des heures negatives (tendance declinante), pas seulement un FAR ponctuellement bon.",
+        "Deux lectures sont affichées séparément: "
+        "1) phase annuelle officielle, 2) statut de transition 2→3.",
         severity="info",
     )
-
     if not df_q3.empty:
-        st.caption("Scatter : FAR latest vs h_negative latest par pays (2024)")
-        fig_q3 = px.scatter(
-            df_q3,
+        q3_plot = df_q3.copy()
+        for col in ["h_negative_declining_latest", "h_negative_slope_per_year", "status_transition_2_to_3"]:
+            if col not in q3_plot.columns:
+                q3_plot[col] = np.nan
+        if "h_negative_declining_latest" in q3_plot.columns:
+            q3_plot["h_negative_declining_latest"] = (
+                q3_plot["h_negative_declining_latest"].astype("boolean").fillna(False).astype(bool)
+            )
+
+        fig = px.scatter(
+            q3_plot,
             x="far_latest",
             y="h_negative_latest",
             color="country",
-            color_discrete_map=COUNTRY_PALETTE,
             size="h_regime_a_latest",
-            hover_data=["status_transition_2_to_3", "h_negative_slope_per_year", "sr_latest"],
-            opacity=0.5,
+            hover_data=["status_transition_2_to_3", "h_negative_slope_per_year", "h_negative_declining_latest"],
+            color_discrete_map=COUNTRY_PALETTE,
+            opacity=0.6,
         )
-        fig_q3.add_vline(x=0.60, line_dash="dash", line_color="#94a3b8",
-                         annotation_text="FAR=0.60", annotation_position="top left")
-        fig_q3.update_layout(
-            height=480,
-            xaxis_title="FAR (Flex Absorption Ratio) - 2024",
-            yaxis_title="Heures negatives observees - 2024",
-            **PLOTLY_LAYOUT_DEFAULTS,
-        )
-        fig_q3.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
-        fig_q3.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-        st.plotly_chart(fig_q3, use_container_width=True)
-
-        narrative(
-            "**Statut 2024** : tous les pays sont en 'transition partielle'. "
-            "Le FAR depasse 0.60 partout, mais les h_neg sont en hausse (pas en detente). "
-            "La taille des bulles represente h_regime_a (surplus non absorbe par la flex domestique)."
-        )
-
-        st.markdown("**Detail par pays** :")
-        for _, row in df_q3.iterrows():
-            c = row["country"]
-            ha = row.get("h_regime_a_latest", 0)
-            ha_str = f"{int(ha)}" if pd.notna(ha) else "0"
-            st.markdown(
-                f"- **{c}** : FAR = {_sf(row.get('far_latest'), '.3f')} | "
-                f"h_neg = {_sf(row.get('h_negative_latest'), '.0f')} | "
-                f"h_regime_a = {ha_str} | "
-                f"pente h_neg = {_sf(row.get('h_negative_slope_per_year'), '.1f')} h/an | "
-                f"statut = {row.get('status_transition_2_to_3', 'n/a')}"
-            )
-
-        challenge_block(
-            "h_neg en hausse partout",
-            "La tendance h_negative_obs est en hausse dans tous les pays (pentes positives de +13 a +27 h/an). "
-            "Cela signifie que la condition de detente des h_neg pour atteindre stage_3 n'est remplie nulle part. "
-            "Le passage effectif a stage_3 n'est pas imminent.",
-        )
-
-
-# ===== TAB 4 : Q4 =====
-with tabs[4]:
-    question_banner("Q4 - Combien de batteries pour freiner la degradation ?")
-
-    dynamic_narrative(
-        "Reponse courte : le diagnostic de plateau teste si ajouter du BESS modifie les metriques structurelles. "
-        "Un plateau signifie que le surplus est deja absorbe par la flex existante (PSH). "
-        "L'ajout de BESS supplementaire n'a pas d'effet visible.",
-        severity="info",
+        fig.add_vline(x=0.60, line_dash="dash", line_color="#94a3b8")
+        fig.update_layout(height=470, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(q3_plot, use_container_width=True, hide_index=True)
+    challenge_block(
+        "Pourquoi une phase peut reculer d'une année à l'autre ?",
+        "Parce que la phase est recalculée chaque année. Si les règles actives changent "
+        "(ex: FAR ou condition de baisse des heures négatives), la phase peut évoluer dans les deux sens.",
     )
 
+with tabs[4]:
+    question_banner("Q4 - Effet des batteries")
+    dynamic_narrative(
+        "Le résultat peut être plat si la flex existante absorbe déjà le surplus. "
+        "Dans ce cas, l'effet BESS n'est visible qu'après stress de référence.",
+        severity="info",
+    )
     if not df_q4.empty:
-        st.caption("Stress PV minimal pour identifier un effet BESS par pays (2024)")
-        df_q4_sorted = df_q4.sort_values("stress_delta_pv_gw")
-        fig_q4 = px.bar(
-            df_q4_sorted,
+        fig = px.bar(
+            df_q4.sort_values("country"),
             x="country",
             y="stress_delta_pv_gw",
             color="country",
             color_discrete_map=COUNTRY_PALETTE,
         )
-        fig_q4.update_layout(
-            height=420,
-            xaxis_title="Pays",
-            yaxis_title="Delta PV additionnel (GW) pour effet BESS",
-            showlegend=False,
-            **PLOTLY_LAYOUT_DEFAULTS,
-        )
-        fig_q4.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
-        fig_q4.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-        st.plotly_chart(fig_q4, use_container_width=True)
+        fig.update_layout(height=420, showlegend=False, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df_q4, use_container_width=True, hide_index=True)
 
-        section_header("Diagnostic par pays")
-        for _, row in df_q4.iterrows():
-            c = row["country"]
-            surplus = row.get("surplus_unabs_twh_baseline", 0)
-            far_b = row.get("far_baseline", 0)
-            ha_b = row.get("h_regime_a_baseline", 0)
-            stress_gw = row.get("stress_delta_pv_gw", 0)
-            plateau = row.get("plateau_baseline", True)
-
-            if surplus > 1.0:
-                interpretation = (
-                    f"Surplus non absorbe = {_sf(surplus, '.2f')} TWh. "
-                    f"La flex domestique ne couvre que {_sf(far_b, '.1%')} du surplus. "
-                    f"Le BESS a un role structurel potentiel pour absorber les {int(ha_b)} heures en regime A."
-                )
-            elif surplus > 0.01:
-                interpretation = (
-                    f"Petit surplus residuel = {_sf(surplus, '.3f')} TWh ({int(ha_b)} heures en regime A). "
-                    f"Le BESS a un role marginal en baseline."
-                )
-            else:
-                interpretation = (
-                    "Aucun surplus residuel en baseline (FAR = 1.0). "
-                    "La flex domestique absorbe deja tout le surplus. "
-                    f"Il faut ajouter {int(stress_gw)} GW de PV pour que le BESS devienne utile."
-                )
-
-            st.markdown(f"**{c}** : {interpretation}")
-
-        dynamic_narrative(
-            "<strong>Pourquoi la France concentre l'essentiel du surplus non absorbe</strong><br>"
-            "Le surplus francais est d'origine <strong>nucleaire</strong>, pas VRE. "
-            "L'IR (Inflexibility Ratio) de la France depasse 1.0 : le must-run nucleaire seul "
-            "excede la demande minimale (P10). Ce surplus existait deja en 2015 "
-            "(4043 h en regime A, 5% de VRE seulement) et a chute a 378 h en 2022 "
-            "(crise corrosion nucleaire, IR = 0.71), confirmant que c'est le nucleaire "
-            "— pas les VRE — qui en est le moteur.<br><br>"
-            "Le modele ne compte que PSH + exports + BESS comme flex. "
-            "L'hydro barrage (~10 GW) et le DSM ne sont pas modelises. "
-            "En consequence, les 4437 h de regime A et 12.47 TWh de surplus non absorbe "
-            "surestiment le stress reel : seules ~350 h affichent des prix negatifs sur le marche "
-            "(coherence regime/prix = 28%). "
-            "Pour DE/DK/ES/PL, le modele est bien calibre (coherence > 90%).",
-            severity="warning",
-        )
-
-        challenge_block(
-            "Plateau BESS = resultat physiquement normal",
-            "Dans le sweep baseline, le FAR reste a 1.0 et h_regime_a a 0 "
-            "quelle que soit la capacite BESS ajoutee (quand la flex existante suffit). "
-            "Ce n'est pas un bug : si le surplus est deja absorbe, ajouter du BESS ne change rien. "
-            "Il faut un stress PV additionnel pour creer du surplus residuel.",
-        )
-
-
-# ===== TAB 5 : Q5 =====
 with tabs[5]:
-    question_banner("Q5 - Quel est l'impact CO2/Gaz sur l'ancre thermique ?")
-
+    question_banner("Q5 - Impact CO2/gaz sur TTL")
     dynamic_narrative(
-        "Reponse courte : le TTL (ancre thermique longue duree) augmente significativement sous stress "
-        "CO2 ou gaz. L'ampleur depend du mix electrique de chaque pays.",
+        "Le test compare le TTL baseline à des scénarios déterministes CO2 élevé et gaz élevé.",
         severity="info",
     )
-
     if not df_q5.empty:
         melt = df_q5.melt(
             id_vars=["country", "year"],
@@ -462,195 +298,78 @@ with tabs[5]:
             var_name="scenario",
             value_name="delta_ttl",
         )
-        melt["scenario"] = melt["scenario"].replace({
-            "delta_ttl_high_co2": "CO2 eleve",
-            "delta_ttl_high_gas": "Gaz eleve",
-        })
+        fig = px.bar(melt, x="country", y="delta_ttl", color="scenario", barmode="group")
+        fig.add_hline(y=0.0, line_dash="dash", line_color="#64748b")
+        fig.update_layout(height=430, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df_q5, use_container_width=True, hide_index=True)
 
-        st.caption("Impact sur le TTL des scenarios CO2 eleve et gaz eleve par pays (2024)")
-        fig_q5 = px.bar(
-            melt,
-            x="country",
-            y="delta_ttl",
-            color="scenario",
-            barmode="group",
-        )
-        fig_q5.add_hline(y=0.0, line_dash="dash", line_color="#64748b")
-        fig_q5.update_layout(
-            height=420,
-            xaxis_title="Pays",
-            yaxis_title="Delta TTL (EUR/MWh)",
-            **PLOTLY_LAYOUT_DEFAULTS,
-        )
-        fig_q5.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
-        fig_q5.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-        st.plotly_chart(fig_q5, use_container_width=True)
-
-        narrative(
-            "**Sensibilite CO2** : PL est tres sensible au CO2 "
-            f"(+{_sf(df_q5[df_q5['country'] == 'PL']['delta_ttl_high_co2'].iloc[0] if len(df_q5[df_q5['country'] == 'PL']) > 0 else 0, '.0f')} EUR/MWh) "
-            "en raison de son mix charbon. FR est le moins sensible "
-            f"(+{_sf(df_q5[df_q5['country'] == 'FR']['delta_ttl_high_co2'].iloc[0] if len(df_q5[df_q5['country'] == 'FR']) > 0 else 0, '.0f')} EUR/MWh) "
-            "grace au nucleaire."
-        )
-
-        st.markdown("""
-**Classement sensibilite CO2** : PL > ES > DK > DE > FR
-
-**Classement sensibilite gaz** : ES > DE > DK > FR > PL
-""")
-
-        challenge_block(
-            "Asymetrie FR/PL notable",
-            "L'ecart de sensibilite CO2 entre PL (+86 EUR/MWh) et FR (+25 EUR/MWh) est un facteur 3.5x. "
-            "Cela reflete la dependance au charbon de la Pologne vs le mix nucleaire de la France. "
-            "Pour la Pologne, toute hausse du prix CO2 a un impact direct et massif sur le TTL.",
-        )
-
-
-# ===== TAB 6 : Q6 =====
 with tabs[6]:
-    question_banner("Q6 - Stockage chaleur/froid : synergie ou competition avec BESS ?")
-
+    question_banner("Q6 - Stockage chaleur/froid")
     dynamic_narrative(
-        "Reponse courte : le BESS est plus efficace en aller-retour court (2-8h), "
-        "le thermique peut etre pertinent sur durees longues (12-24h). "
-        "Les deux sont complementaires si les usages sont bien segmentes.",
-        severity="info",
+        "Conclusion prudente: sans jeu de données chaleur/froid dédié, la causalité n'est pas identifiable.",
+        severity="warning",
     )
-
-    narrative(
-        "Le perimetre actuel du modele ne contient pas de variable chaleur/froid dediee. "
-        "Aucune conclusion causale n'est possible sans dataset specifique."
-    )
-
     if not df_q6.empty:
         st.dataframe(df_q6, use_container_width=True, hide_index=True)
 
-    narrative(
-        "La page 6 (onglet Q6) propose neanmoins une comparaison indicative : "
-        "le BESS (rendement aller-retour eta = 0.88) est plus efficient que le stockage thermique "
-        "(eta = 0.50) en cycle court. En duree longue (>12h), le thermique pourrait devenir "
-        "pertinent grace a des couts de capacite plus faibles, mais cette hypothese n'est pas "
-        "validable avec les donnees actuelles."
-    )
-
-    challenge_block(
-        "Perimetre limite",
-        "Sans donnees de consommation chaleur/froid par pays, toute conclusion sur la synergie "
-        "BESS/thermique reste qualitative. L'integration d'un dataset CHP/district heating "
-        "permettrait de quantifier le potentiel de couplage sectoriel.",
-    )
-
-
-# ===== TAB 7 : CONCLUSIONS PAYS =====
 with tabs[7]:
-    section_header("Conclusions par pays", "Synthese des reponses Q1-Q6 pour chaque pays")
-
-    # --- Comparative table ---
+    section_header("Conclusions par pays")
     if not df_country.empty:
-        st.markdown("#### Tableau comparatif")
-        for _, row in df_country.iterrows():
-            c = row["country"]
-            cols = st.columns([1, 1, 1, 1, 1])
-            with cols[0]:
-                render_kpi_banner("Pays", c, row.get("phase_latest", "?"), "medium")
-            with cols[1]:
-                far_v = row.get("far_latest", 0)
-                render_kpi_banner("FAR", _sf(far_v, ".3f"), "",
-                                  "strong" if far_v >= 0.95 else "medium" if far_v >= 0.80 else "weak")
-            with cols[2]:
-                cr = row.get("capture_ratio_pv_latest", 0)
-                render_kpi_banner("CR_PV", _sf(cr, ".3f"), "",
-                                  "strong" if cr >= 0.85 else "medium" if cr >= 0.70 else "weak")
-            with cols[3]:
-                slope = row.get("q2_slope", 0)
-                render_kpi_banner("Pente Q2", _sf(slope, ".4f"), "",
-                                  "weak" if abs(slope) > 0.05 else "medium")
-            with cols[4]:
-                d_co2 = row.get("q5_delta_ttl_co2", 0)
-                render_kpi_banner("Delta CO2", f"+{_sf(d_co2, '.0f')} EUR", "",
-                                  "weak" if d_co2 > 60 else "medium")
-            st.markdown("---")
+        st.dataframe(df_country, use_container_width=True, hide_index=True)
+        for _, row in df_country.sort_values("country").iterrows():
+            country = str(row.get("country", "N/A"))
+            with st.expander(f"{country} — phase {row.get('phase_latest', 'unknown')} ({int(row.get('latest_year', 0))})"):
+                cols = st.columns(4)
+                cols[0].metric("SR", _sf(row.get("sr_latest"), ".4f"))
+                cols[1].metric("FAR", _sf(row.get("far_latest"), ".3f"))
+                cols[2].metric("CR_PV", _sf(row.get("capture_ratio_pv_latest"), ".3f"))
+                cols[3].metric("Q3 transition", str(row.get("q3_status", "n/a")))
+                st.markdown(
+                    f"- Phase officielle (annuelle): `{row.get('phase_latest', 'unknown')}`\n"
+                    f"- Statut transition 2→3: `{row.get('q3_status', 'n/a')}`\n"
+                    f"- Sensibilité TTL CO2: `{_sf(row.get('q5_delta_ttl_co2'), '.2f')}` EUR/MWh\n"
+                    f"- Sensibilité TTL gaz: `{_sf(row.get('q5_delta_ttl_gas'), '.2f')}` EUR/MWh"
+                )
 
-        # --- Country fiches ---
-        section_header("Fiches pays detaillees")
-        for _, row in df_country.iterrows():
-            c = row["country"]
-            with st.expander(f"**{c}** — {row.get('phase_latest', '?')} (2024)", expanded=False):
-                fc = st.columns(3)
-                with fc[0]:
-                    render_kpi_banner(
-                        "Phase 2024", row.get("phase_latest", "?"),
-                        f"SR = {_sf(row.get('sr_latest'), '.4f')}",
-                        "medium",
-                    )
-                with fc[1]:
-                    far_v = row.get("far_latest", 0)
-                    render_kpi_banner(
-                        "FAR", _sf(far_v, ".3f"),
-                        "Absorption domestique",
-                        "strong" if far_v >= 0.95 else "medium" if far_v >= 0.80 else "weak",
-                    )
-                with fc[2]:
-                    cr = row.get("capture_ratio_pv_latest", 0)
-                    render_kpi_banner(
-                        "Capture ratio PV", _sf(cr, ".3f"),
-                        "Degradation vs baseload",
-                        "strong" if cr >= 0.85 else "medium" if cr >= 0.70 else "weak",
-                    )
-
-                first_yr = row.get("q1_first_stage2_year")
-                yr_str = f"{int(first_yr)}" if pd.notna(first_yr) else "jamais"
-
-                # Q3 data for this country
-                q3_row = df_q3[df_q3["country"] == c].iloc[0] if len(df_q3[df_q3["country"] == c]) > 0 else {}
-                ha_latest = q3_row.get("h_regime_a_latest", 0) if isinstance(q3_row, dict) or hasattr(q3_row, "get") else (q3_row["h_regime_a_latest"] if "h_regime_a_latest" in q3_row.index else 0)
-
-                # Q4 data for this country
-                q4_row = df_q4[df_q4["country"] == c].iloc[0] if len(df_q4[df_q4["country"] == c]) > 0 else {}
-                surplus_val = q4_row.get("surplus_unabs_twh_baseline", 0) if isinstance(q4_row, dict) or hasattr(q4_row, "get") else (q4_row["surplus_unabs_twh_baseline"] if "surplus_unabs_twh_baseline" in q4_row.index else 0)
-
-                st.markdown(f"""
-**Q1** : Premier franchissement simultane des 3 seuils stage_2 = **{yr_str}**.
-
-**Q2** : Pente = **{_sf(row.get('q2_slope'), '.4f')}** par pp de penetration PV.{' (fragile, n=4, p>0.05)' if c == 'PL' else ' (significatif, p<=0.05)'}
-
-**Q3** : Statut transition = **{row.get('q3_status', 'n/a')}**. FAR = {_sf(row.get('far_latest'), '.3f')}, h_regime_a = {int(ha_latest) if pd.notna(ha_latest) else 0}.
-
-**Q4** : Surplus non absorbe = **{_sf(surplus_val, '.2f')} TWh**. Stress PV = {_sf(row.get('q4_stress_found', ''), '')} → delta = {_sf(df_q4[df_q4['country'] == c]['stress_delta_pv_gw'].iloc[0] if len(df_q4[df_q4['country'] == c]) > 0 else 0, '.0f')} GW.
-
-**Q5** : Sensibilite CO2 = +{_sf(row.get('q5_delta_ttl_co2'), '.0f')} EUR/MWh | Sensibilite gaz = +{_sf(row.get('q5_delta_ttl_gas'), '.0f')} EUR/MWh.
-
-**Q6** : {row.get('q6_status', 'n/a').replace('_', ' ')}.
-""")
-                if c == "FR":
-                    dynamic_narrative(
-                        "<strong>Note methodologique FR</strong> : le surplus non absorbe eleve "
-                        "(12.47 TWh, 4437 h en regime A) est d'origine nucleaire (IR = 1.06), "
-                        "pas VRE (13.4%). Ce phenomene existait en 2015 (4043 h, 5% de VRE) "
-                        "et a chute en 2022 (378 h, crise corrosion). Le modele surestime "
-                        "le stress reel car la flex modelisee (PSH + exports + BESS) exclut "
-                        "l'hydro barrage et le DSM. Coherence regime/prix = 28% "
-                        "(vs > 90% pour DE/DK).",
-                        severity="warning",
-                    )
-
-
-# ===== TAB 8 : ANNEXES =====
 with tabs[8]:
-    section_header("Annexes chiffrees", "Metriques completes 5 pays x 10 ans")
+    section_header("Annexes chiffrées")
+    if not df_latest.empty:
+        latest_plot = df_latest.copy()
+        for col in ["phase_confidence", "phase_score", "far", "sr", "capture_ratio_pv"]:
+            if col not in latest_plot.columns:
+                latest_plot[col] = np.nan
+
+        section_header("Dernière année (cohérence narrative)")
+        fig = px.bar(
+            latest_plot.sort_values("country"),
+            x="country",
+            y="ttl",
+            color="phase",
+            color_discrete_map=PHASE_COLORS,
+            hover_data=["phase_confidence", "phase_score", "far", "sr", "capture_ratio_pv"],
+        )
+        fig.update_layout(height=420, **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+        fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(latest_plot, use_container_width=True, hide_index=True)
 
     if not df_annex.empty:
+        section_header("Métriques complètes")
         st.dataframe(df_annex, use_container_width=True, hide_index=True)
 
+    section_header("Controle qualite des donnees")
     if not df_quality.empty:
-        section_header("Qualite des donnees")
         st.dataframe(df_quality, use_container_width=True, hide_index=True)
-
-        caveat_price = df_quality[df_quality.get("price_completeness", pd.Series(dtype=float)).lt(0.90)] if "price_completeness" in df_quality.columns else pd.DataFrame()
-        if not caveat_price.empty:
-            dynamic_narrative(
-                "Completude prix < 90% detectee sur certaines paires (notamment PL 2015-2016).",
-                severity="warning",
-            )
+        if "price_completeness" in df_quality.columns:
+            caveat_price = df_quality[df_quality["price_completeness"] < 0.90]
+            if not caveat_price.empty:
+                dynamic_narrative(
+                    f"Completude prix < 90% détectée sur {len(caveat_price)} couples pays-année.",
+                    severity="warning",
+                )
+    else:
+        st.info("Aucun indicateur qualité disponible dans le payload statique.")

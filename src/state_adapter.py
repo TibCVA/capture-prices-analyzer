@@ -120,6 +120,9 @@ def metrics_to_dataframe(state: Mapping | None, price_mode: str | None) -> pd.Da
             "phase": diag.get("phase", rec.get("phase", "unknown")),
             "phase_confidence": diag.get("confidence", np.nan),
             "phase_score": diag.get("score", np.nan),
+            "phase_blocked_rules": "; ".join(diag.get("blocked_rules", []))
+            if isinstance(diag, Mapping)
+            else "",
         }
         row.update(rec)
         rows.append(row)

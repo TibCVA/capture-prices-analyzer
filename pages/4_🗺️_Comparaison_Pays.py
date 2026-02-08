@@ -13,7 +13,6 @@ import streamlit as st
 from src.commentary_bridge import so_what_block
 from src.export_utils import export_to_excel, export_to_gsheets
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
-from src.ui_theme import COUNTRY_PALETTE, PHASE_COLORS, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     guard_no_data,
     inject_global_css,
@@ -22,10 +21,35 @@ from src.ui_helpers import (
     render_commentary,
     section_header,
 )
+from src.ui_theme import COUNTRY_PALETTE, PHASE_COLORS, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 
-st.set_page_config(page_title="Comparaison pays", page_icon="🗺️", layout="wide")
+st.set_page_config(page_title="Comparaison pays", page_icon="🌍", layout="wide")
 inject_global_css()
 st.title("🗺️ Comparaison Pays")
+
+
+def _phase_order_value(phase: str) -> int:
+    mapping = {"stage_1": 1, "stage_2": 2, "stage_3": 3, "stage_4": 4}
+    return mapping.get(str(phase), 0)
+
+
+def _phase_from_value(value: int) -> str:
+    rev = {1: "stage_1", 2: "stage_2", 3: "stage_3", 4: "stage_4"}
+    return rev.get(int(value), "unknown")
+
+
+def _smooth_phase_latest(df_hist: pd.DataFrame, country: str, year: int) -> str:
+    sub = df_hist[(df_hist["country"] == country) & (df_hist["year"] <= year)].sort_values("year")
+    if sub.empty:
+        return "unknown"
+    tail = sub.tail(3)
+    vals = tail["phase"].astype(str).map(_phase_order_value)
+    vals = vals[vals > 0]
+    if vals.empty:
+        return "unknown"
+    med = int(round(float(vals.median())))
+    return _phase_from_value(med)
+
 
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
@@ -37,11 +61,16 @@ if df_all.empty or "country" not in df_all.columns:
     guard_no_data("la page Comparaison pays")
 
 years = sorted(df_all["year"].dropna().unique())
-year = st.selectbox("Annee", years, index=len(years) - 1)
+year = st.selectbox("Année", years, index=len(years) - 1)
 countries = st.multiselect(
     "Pays",
     sorted(df_all["country"].dropna().unique()),
     default=state.get("countries_selected", []),
+)
+show_smoothed_phase = st.toggle(
+    "Afficher phase lissée 3 ans (lecture pédagogique)",
+    value=False,
+    help="La phase officielle reste annuelle; ce lissage sert uniquement à lire les tendances.",
 )
 if not countries:
     guard_no_data("la page Comparaison pays")
@@ -52,21 +81,46 @@ if df.empty:
 
 df = ensure_plot_columns(
     df,
-    ["sr", "far", "ir", "ttl", "capture_ratio_pv", "h_negative_obs", "vre_penetration_pct_gen", "phase"],
+    [
+        "sr",
+        "far",
+        "ir",
+        "ttl",
+        "capture_ratio_pv",
+        "h_negative_obs",
+        "vre_penetration_pct_gen",
+        "phase",
+        "phase_confidence",
+        "phase_score",
+        "phase_blocked_rules",
+    ],
     with_notice=True,
 )
-df = coerce_numeric_columns(df, ["sr", "far", "ir", "ttl", "capture_ratio_pv", "h_negative_obs", "vre_penetration_pct_gen"])
+df = coerce_numeric_columns(
+    df,
+    [
+        "sr",
+        "far",
+        "ir",
+        "ttl",
+        "capture_ratio_pv",
+        "h_negative_obs",
+        "vre_penetration_pct_gen",
+        "phase_confidence",
+        "phase_score",
+    ],
+)
 
 missing_cols = df.attrs.get("_missing_plot_columns", [])
 if missing_cols:
-    st.info("Colonnes manquantes completees en NaN pour robustesse d'affichage: " + ", ".join(missing_cols))
+    st.info("Colonnes manquantes complétées en NaN pour robustesse d'affichage: " + ", ".join(missing_cols))
 
 narrative(
-    "Objectif: comparer la structure de stress des pays sur une meme annee. "
-    "Le radar est oriente en mode 'stress': plus la valeur est elevee, plus le pays est sous pression structurelle."
+    "Objectif: comparer la structure de stress des pays sur une même année. "
+    "Le radar est orienté en mode stress: plus la valeur est élevée, plus le pays est sous pression structurelle."
 )
 
-section_header("Radar structurel (profil de stress)", "Axes normalises de 0 a 1, orientation unique stress")
+section_header("Radar structurel (profil de stress)", "Axes normalisés de 0 à 1, orientation unique stress")
 
 radar_raw = df.copy()
 radar_raw["far_stress"] = 1.0 - radar_raw["far"]
@@ -78,7 +132,7 @@ axes_map = {
     "IR": "ir",
     "TTL": "ttl",
     "Capture PV (stress)": "capture_ratio_pv_stress",
-    "Heures negatives": "h_negative_obs",
+    "Heures négatives": "h_negative_obs",
 }
 
 radar = radar_raw.copy()
@@ -116,31 +170,41 @@ fig1.update_layout(
     polar=dict(radialaxis=dict(visible=True, range=[0, 1], tickfont=dict(size=10), gridcolor="#dbe5f1")),
     **PLOTLY_LAYOUT_DEFAULTS,
 )
-st.caption("Axes normalises 0-1. Plus la surface est large, plus le stress est eleve.")
+st.caption("Axes normalisés 0-1. Plus la surface est large, plus le stress est élevé.")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
     so_what_block(
-        title="Lecture radar orientee stress",
-        purpose="Le radar permet de voir en un coup d'oeil les pays ou le stress est concentre sur surplus, rigidite ou cannibalisation.",
+        title="Lecture radar orientée stress",
+        purpose="Le radar permet de voir en un coup d'œil les pays où le stress est concentré sur surplus, rigidité ou cannibalisation.",
         observed={
             "n_pays": len(radar),
             "sr_mean": float(df["sr"].mean()),
             "far_mean": float(df["far"].mean()),
             "capture_ratio_pv_mean": float(df["capture_ratio_pv"].mean()),
         },
-        method_link="Normalisation min-max intra-echantillon; inversion FAR/capture ratio pour une orientation stress uniforme.",
-        limits="Comparaison relative au panier selectionne; ajouter/retirer un pays change la normalisation.",
+        method_link="Normalisation min-max intra-échantillon; inversion FAR/capture ratio pour une orientation stress uniforme.",
+        limits="Comparaison relative au panier sélectionné; ajouter/retirer un pays change la normalisation.",
         n=len(radar),
-        decision_use="Prioriser les pays a traiter en premier selon la nature dominante du stress.",
+        decision_use="Prioriser les pays à traiter en premier selon la nature dominante du stress.",
     )
 )
 
-section_header("Valeurs brutes derriere le radar", "Transparence des valeurs non normalisees")
-raw_cols = ["country", "sr", "far", "ir", "ttl", "capture_ratio_pv", "h_negative_obs", "phase"]
+section_header("Valeurs brutes derrière le radar", "Transparence des valeurs non normalisées")
+raw_cols = [
+    "country",
+    "sr",
+    "far",
+    "ir",
+    "ttl",
+    "capture_ratio_pv",
+    "h_negative_obs",
+    "phase",
+    "phase_confidence",
+]
 st.dataframe(df[raw_cols], use_container_width=True, hide_index=True)
 
-section_header("Penetration VRE vs capture ratio PV", "Taille bulle = heures negatives")
+section_header("Pénétration VRE vs capture ratio PV", "Taille bulle = heures négatives")
 fig2 = px.scatter(
     df,
     x="vre_penetration_pct_gen",
@@ -148,57 +212,82 @@ fig2 = px.scatter(
     color="country",
     size="h_negative_obs",
     color_discrete_map=COUNTRY_PALETTE,
-    hover_data=["phase", "sr", "far", "ir", "ttl"],
+    hover_data=["phase", "phase_confidence", "sr", "far", "ir", "ttl"],
 )
-fig2.update_layout(height=480, title="Penetration VRE vs capture ratio PV", xaxis_title="Penetration VRE (% generation)", yaxis_title="Capture ratio PV", **PLOTLY_LAYOUT_DEFAULTS)
+fig2.update_layout(
+    height=480,
+    title="Pénétration VRE vs capture ratio PV",
+    xaxis_title="Pénétration VRE (% génération)",
+    yaxis_title="Capture ratio PV",
+    **PLOTLY_LAYOUT_DEFAULTS,
+)
 fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-st.caption("Taille des bulles = nombre d'heures a prix negatif.")
+st.caption("Taille des bulles = nombre d'heures à prix négatif.")
 st.plotly_chart(fig2, use_container_width=True)
 
 render_commentary(
     so_what_block(
-        title="Positionnement competitif",
-        purpose="Comparer les pays a penetration elevee selon leur capacite a maintenir un capture ratio defendable.",
+        title="Positionnement comparatif",
+        purpose="Comparer les pays à pénétration élevée selon leur capacité à maintenir un capture ratio défendable.",
         observed={
             "vre_min_pct": float(df["vre_penetration_pct_gen"].min()),
             "vre_max_pct": float(df["vre_penetration_pct_gen"].max()),
             "capture_ratio_min": float(df["capture_ratio_pv"].min()),
             "h_negative_total": float(df["h_negative_obs"].sum()),
         },
-        method_link="Penetration en % generation (v3); capture ratio sur price_used.",
-        limits="Photographie annuelle: completer avec trajectoires temporelles (pages Historique et Capture Rates).",
+        method_link="Pénétration en % génération (v3); capture ratio sur price_used.",
+        limits="Photographie annuelle: compléter avec trajectoires temporelles (pages Historique et Capture Rates).",
         n=len(df),
-        decision_use="Identifier les pays ou accelerer la flexibilite avant d'augmenter encore la penetration VRE.",
+        decision_use="Identifier les pays où accélérer la flexibilité avant d'augmenter encore la pénétration VRE.",
     )
 )
 
-section_header("Comparaison phase vs TTL", "Diagnostic de stade et queue haute")
+section_header("Comparaison phase vs TTL", "Phase annuelle (non monotone) et queue haute")
 phase_df = df.copy()
-phase_df["phase"] = phase_df["phase"].fillna("unknown")
+phase_df["phase_officielle"] = phase_df["phase"].fillna("unknown")
+phase_df["phase_affichee"] = phase_df["phase_officielle"]
+if show_smoothed_phase:
+    phase_df["phase_affichee"] = phase_df["country"].apply(lambda c: _smooth_phase_latest(df_all, c, int(year)))
+
 fig3 = px.bar(
     phase_df.sort_values("ttl", ascending=False),
     x="country",
     y="ttl",
-    color="phase",
+    color="phase_affichee",
     color_discrete_map=PHASE_COLORS,
-    hover_data=["sr", "far", "ir", "capture_ratio_pv"],
+    hover_data=["phase_officielle", "phase_confidence", "phase_score", "phase_blocked_rules", "sr", "far", "ir", "capture_ratio_pv"],
 )
-fig3.update_layout(height=420, title="Phase de marche vs TTL", xaxis_title="Pays", yaxis_title="TTL (EUR/MWh)", **PLOTLY_LAYOUT_DEFAULTS)
+fig3.update_layout(
+    height=420,
+    title="Phase de marché vs TTL",
+    xaxis_title="Pays",
+    yaxis_title="TTL (EUR/MWh)",
+    **PLOTLY_LAYOUT_DEFAULTS,
+)
 fig3.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig3.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-st.caption("Classement par TTL decroissant. Couleur = phase de marche.")
+st.caption(
+    "Classement par TTL décroissant. Couleur = phase annuelle. "
+    "La phase peut changer d'une année à l'autre selon les indicateurs observés."
+)
+if show_smoothed_phase:
+    st.caption("Mode lissé actif: la couleur affiche la médiane des 3 dernières phases annuelles (lecture pédagogique).")
 st.plotly_chart(fig3, use_container_width=True)
 
 render_commentary(
     so_what_block(
-        title="Queue thermique et stade",
-        purpose="Un TTL eleve peut renforcer la valeur de flexibilite, mais signale aussi une queue de prix plus risquee.",
-        observed={"ttl_median": float(df["ttl"].median()), "ttl_max": float(df["ttl"].max())},
-        method_link="TTL = P95(price_used) sur regimes C+D; phase issue du score thresholds.yaml.",
-        limits="TTL peut etre influence par chocs commodites independamment de la penetration VRE.",
+        title="Queue thermique et stade annuel",
+        purpose="Un TTL élevé peut renforcer la valeur de flexibilité, mais signale aussi une queue de prix plus risquée.",
+        observed={
+            "ttl_median": float(df["ttl"].median()),
+            "ttl_max": float(df["ttl"].max()),
+            "phase_confidence_median": float(df["phase_confidence"].median()) if df["phase_confidence"].notna().any() else float("nan"),
+        },
+        method_link="TTL = P95(price_used) sur régimes C+D; phase = score annuel issu de thresholds.yaml.",
+        limits="La phase est annuelle et non monotone; un pays peut passer de stage_3 à stage_2 selon FAR/h_negative et autres règles.",
         n=len(df),
-        decision_use="Arbitrer entre leviers de couverture prix et leviers de flexibilite physique.",
+        decision_use="Lire la phase comme un état observé annuel, pas comme un chemin irréversible.",
     )
 )
 
@@ -218,7 +307,7 @@ with col1:
         export_to_excel(metrics_rows, diag_rows, [], path)
         with open(path, "rb") as f:
             st.download_button(
-                label="Telecharger le fichier",
+                label="Télécharger le fichier",
                 data=f.read(),
                 file_name=f"comparaison_{year}_{ts}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -228,6 +317,6 @@ with col2:
     if st.button("Exporter Google Sheets"):
         url = export_to_gsheets(metrics_rows, diag_rows, [], f"Comparaison_{year}")
         if url:
-            st.success(f"Export cree: {url}")
+            st.success(f"Export créé: {url}")
         else:
             st.warning("Credentials absentes ou export indisponible.")

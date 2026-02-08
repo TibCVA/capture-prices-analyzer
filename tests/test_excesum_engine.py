@@ -201,3 +201,7 @@ def test_run_excesum_baseline_force_recompute_yields_regime_a(monkeypatch) -> No
     row = out["metrics_df"].iloc[0]
     assert float(row["h_regime_a"]) > 0
     assert float(row["total_surplus_unabs_twh"]) > 0
+    assert "h_negative_declining" in out["metrics_df"].columns
+    assert "phase_blocked_rules" in out["metrics_df"].columns
+    cc = out["country_conclusions"].iloc[0]
+    assert cc["phase_latest"] == row["phase"]

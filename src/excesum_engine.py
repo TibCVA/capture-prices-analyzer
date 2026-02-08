@@ -23,6 +23,7 @@ from src.data_loader import (
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
 from src.objectives_loader import load_objectives_docx
+from src.phase_context import compute_h_negative_declining_flags
 from src.phase_diagnostics import diagnose_phase
 from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope
@@ -165,11 +166,7 @@ def _build_baseline_records(
                 processed[(country, year)] = df_proc
 
                 metrics = compute_annual_metrics(df_proc, country, year, countries_cfg[country])
-                diag = diagnose_phase(metrics, thresholds)
                 record = dict(metrics)
-                record["phase"] = diag.get("phase", "unknown")
-                record["phase_confidence"] = diag.get("confidence", np.nan)
-                record["phase_score"] = diag.get("score", np.nan)
                 rows.append(record)
 
                 raw_flags = load_meta.get("raw_quality_flags", [])
@@ -199,6 +196,27 @@ def _build_baseline_records(
         return pd.DataFrame(), processed, issues, pd.DataFrame()
 
     df = pd.DataFrame(rows).sort_values(["country", "year"]).reset_index(drop=True)
+    hneg_ctx = compute_h_negative_declining_flags(df[["country", "year", "h_negative_obs"]])
+    df = df.merge(hneg_ctx, on=["country", "year"], how="left")
+    df["h_negative_declining"] = df["h_negative_declining"].fillna(False).astype(bool)
+
+    phases: list[str] = []
+    confidences: list[float] = []
+    scores: list[int] = []
+    blocked_rows: list[str] = []
+    for _, row in df.iterrows():
+        metrics = row.to_dict()
+        diag = diagnose_phase(metrics, thresholds)
+        phases.append(diag.get("phase", "unknown"))
+        confidences.append(float(diag.get("confidence", np.nan)))
+        scores.append(int(diag.get("score", 0)))
+        blocked_rows.append("; ".join(diag.get("blocked_rules", [])))
+
+    df["phase"] = phases
+    df["phase_confidence"] = confidences
+    df["phase_score"] = scores
+    df["phase_blocked_rules"] = blocked_rows
+
     qdf = pd.DataFrame(quality_rows).sort_values(["country", "year"]).reset_index(drop=True)
     return df, processed, issues, qdf
 
@@ -284,11 +302,12 @@ def _q3_transition_status(metrics_df: pd.DataFrame, thresholds: dict) -> pd.Data
             slope_hneg = float(np.polyfit(x, y, 1)[0])
         else:
             slope_hneg = float("nan")
+        declining_latest = bool(latest.get("h_negative_declining", np.isfinite(slope_hneg) and slope_hneg < 0))
         far_latest = _safe_float(latest["far"])
         hneg_latest = _safe_float(latest["h_negative_obs"])
         h_a_latest = _safe_float(latest["h_regime_a"])
 
-        if np.isfinite(far_latest) and far_latest >= far_min and np.isfinite(slope_hneg) and slope_hneg < 0 and hneg_latest <= h_negative_min:
+        if np.isfinite(far_latest) and far_latest >= far_min and declining_latest and hneg_latest <= h_negative_min:
             status = "transition_validee"
         elif np.isfinite(far_latest) and far_latest >= far_min:
             status = "transition_partielle"
@@ -301,6 +320,7 @@ def _q3_transition_status(metrics_df: pd.DataFrame, thresholds: dict) -> pd.Data
                 "far_latest": far_latest,
                 "h_negative_latest": hneg_latest,
                 "h_negative_slope_per_year": slope_hneg,
+                "h_negative_declining_latest": declining_latest,
                 "h_regime_a_latest": h_a_latest,
                 "sr_latest": _safe_float(latest["sr"]),
                 "status_transition_2_to_3": status,
@@ -565,6 +585,8 @@ def build_country_conclusions(
                 "country": country,
                 "latest_year": int(latest["year"]),
                 "phase_latest": latest.get("phase", "unknown"),
+                "phase_confidence_latest": _safe_float(latest.get("phase_confidence")),
+                "phase_blocked_rules_latest": str(latest.get("phase_blocked_rules", "")),
                 "sr_latest": _safe_float(latest.get("sr")),
                 "far_latest": _safe_float(latest.get("far")),
                 "capture_ratio_pv_latest": _safe_float(latest.get("capture_ratio_pv")),

@@ -10,7 +10,7 @@ Les tableaux de preuve sont produits dans la page ExceSum et dans les objets de 
 
 ## Qualite donnees / imputations / completudes
 - Couples avec price_completeness < 90%: 2
-- Couples avec imputations de colonnes raw: 4
+- Couples avec imputations de colonnes raw: 0
 - Couples caches invalides detectes: 0
 - Paires prix incomplets (extrait):
   - PL 2015: price_completeness=0.663
