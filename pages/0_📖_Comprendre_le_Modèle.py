@@ -470,6 +470,7 @@ Un seul ratio ne dit rien. C'est leur **combinaison** qui raconte l'histoire :
         phase = metrics_row.get("phase", "unknown")
         conf = metrics_row.get("phase_confidence", np.nan)
         score = metrics_row.get("phase_score", np.nan)
+        blocked_rules_txt = str(metrics_row.get("phase_blocked_rules", "") or "").strip()
         conf_txt = f"{(float(conf) * 100.0):.1f}%" if np.isfinite(conf) else "N/A"
 
         phase_status = "strong" if np.isfinite(conf) and conf >= 0.70 else ("medium" if np.isfinite(conf) and conf >= 0.50 else "weak")
@@ -479,6 +480,8 @@ Un seul ratio ne dit rien. C'est leur **combinaison** qui raconte l'histoire :
             f"Score = {score if np.isfinite(score) else 'N/A'} | Confiance = {conf_txt}",
             status=phase_status,
         )
+        if blocked_rules_txt:
+            st.caption(f"Regles bloquees: {blocked_rules_txt}")
 
         st.markdown(
             """
@@ -527,19 +530,20 @@ Le surplus VRE devient frequent, les prix sont sous pression, la valeur captee p
 
 ---
 
-##### Stage 3 — Absorption structurelle (la flex repond)
+##### Stage 3 ??? Absorption structurelle (la flex repond)
 
-La flexibilite domestique commence a absorber une part significative du surplus. Les heures negatives **diminuent**.
+La flexibilite absorbe une part significative du surplus **apres** un episode de stress stage 2.
 
 | Critere | Seuil | Points | Signification |
 |---------|-------|--------|---------------|
-| FAR | ≥ 0.60 | +1 | Au moins 60% du surplus est absorbe par la flex modelisee |
-| FAR (seuil fort) | ≥ 0.80 | +2 (bonus) | Absorption elevee — la flex est dimensionnee pour le surplus actuel |
-| Tendance heures negatives | Baissiere | (qualitatif) | Les heures negatives doivent **diminuer** dans le temps — pas juste un FAR eleve ponctuellement |
+| FAR | ??? 0.60 | +1 | Au moins 60% du surplus est absorbe par la flex modelisee |
+| FAR (seuil fort) | ??? 0.80 | +2 (bonus) | Absorption elevee ??? la flex est dimensionnee pour le surplus actuel |
+| Tendance heures negatives | Baissiere | (bloquant) | Les heures negatives doivent **diminuer** dans le temps ??? pas juste un FAR eleve ponctuellement |
+| Historique stage 2 recent | max(h_neg sur 3 ans) ??? 200 | (bloquant) | Le systeme doit avoir connu un niveau de stress stage 2 recent avant d'etre classe en stage 3 |
 
-**Pourquoi aucun pays n'est en stage_3 en 2024** : les FAR sont eleves (0.77 a 0.98), mais les heures negatives continuent d'augmenter (+13 a +27 h/an). Le critere qualitatif de "tendance baissiere" n'est pas rempli. Le surplus augmente plus vite que la flex ne s'adapte.
+**Pourquoi aucun pays n'est en stage_3 en 2024** : les FAR sont eleves (0.77 a 1.00), mais la tendance des heures negatives n'est pas baissiere sur 3 ans. Certains pays sont aussi bloques faute d'historique stage 2 recent.
 
-**Exemple hypothetique** : si l'Allemagne maintenait son FAR de 0.98 **et** que ses heures negatives passaient de 457 a 350 puis 250 sur 3 ans → la tendance serait baissiere → transition vers stage_3 plausible.
+**Exemple 2021** : l'Allemagne peut etre stage_3 (FAR eleve + tendance baissiere + pic recent >= 200), alors que le Danemark est bloque (`require_stage2_history`) malgre FAR eleve, car son pic recent reste < 200.
 
 **Score max** : 3 points.
 
