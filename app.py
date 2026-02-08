@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from src.commentary_engine import comment_kpi, so_what_block
+from src.commentary_bridge import comment_kpi, so_what_block
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
 from src.data_fetcher import fetch_country_year
 from src.data_loader import (

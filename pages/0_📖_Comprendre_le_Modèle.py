@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.constants import (
     COL_LOAD,
     COL_MUST_RUN,

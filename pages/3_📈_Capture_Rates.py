@@ -8,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import comment_regression, so_what_block
+from src.commentary_bridge import comment_regression, so_what_block
 from src.slope_analysis import compute_slope
 from src.state_adapter import ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
 from src.ui_helpers import (

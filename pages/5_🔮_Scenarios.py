@@ -8,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import comment_scenario_delta, so_what_block
+from src.commentary_bridge import comment_scenario_delta, so_what_block
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
 from src.state_adapter import metrics_to_dataframe, normalize_metrics_record

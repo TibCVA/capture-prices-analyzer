@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.state_adapter import ensure_plot_columns, metrics_to_dataframe
 from src.ui_helpers import (
     challenge_block,

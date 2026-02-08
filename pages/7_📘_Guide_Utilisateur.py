@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.ui_helpers import info_card, inject_global_css, render_commentary, section_header
 
 st.set_page_config(page_title="Guide utilisateur", page_icon="📘", layout="wide")

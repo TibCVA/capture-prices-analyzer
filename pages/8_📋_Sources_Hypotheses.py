@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.constants import (
     EF_COAL,
     EF_GAS,

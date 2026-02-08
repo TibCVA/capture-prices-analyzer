@@ -8,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope

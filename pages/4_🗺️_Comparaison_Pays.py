@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import so_what_block
+from src.commentary_bridge import so_what_block
 from src.export_utils import export_to_excel, export_to_gsheets
 from src.state_adapter import ensure_plot_columns, metrics_to_dataframe
 from src.ui_helpers import (
