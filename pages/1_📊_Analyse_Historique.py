@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_engine import commentary_block
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="Analyse historique", page_icon="📊", layout="wide")
 inject_global_css()
@@ -18,6 +18,7 @@ st.title("📊 Analyse historique")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Analyse historique")
+normalize_state_metrics(state)
 
 metrics_dict = state["metrics"]
 if not metrics_dict:
@@ -36,6 +37,10 @@ for y in years:
 df = pd.DataFrame(rows).sort_values("year")
 if df.empty:
     guard_no_data("la page Analyse historique")
+
+for col in ["capture_ratio_pv", "pv_penetration_pct_gen", "h_regime_a", "h_regime_b", "h_regime_c", "h_regime_d", "h_negative_obs", "h_below_5_obs", "sr", "far", "ir", "ttl"]:
+    if col not in df.columns:
+        df[col] = float("nan")
 
 section("Capture ratio vs penetration PV", "Serie 2015-2024")
 fig1 = go.Figure()

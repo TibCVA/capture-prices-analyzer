@@ -69,6 +69,53 @@ def _cached_commodities():
     return load_commodity_prices()
 
 
+_REQUIRED_METRICS_KEYS = {
+    "sr",
+    "far",
+    "ir",
+    "ttl",
+    "capture_ratio_pv",
+    "capture_ratio_wind",
+    "h_regime_a",
+    "h_regime_b",
+    "h_regime_c",
+    "h_regime_d",
+    "h_negative_obs",
+    "h_below_5_obs",
+    "pv_penetration_pct_gen",
+    "wind_penetration_pct_gen",
+    "vre_penetration_pct_gen",
+    "price_used_p95",
+    "regime_coherence",
+}
+
+
+def _normalize_metrics_legacy(m: dict) -> dict:
+    out = dict(m)
+    if "h_negative_obs" not in out and "h_negative" in out:
+        out["h_negative_obs"] = out["h_negative"]
+    if "h_below_5_obs" not in out and "h_below_5" in out:
+        out["h_below_5_obs"] = out["h_below_5"]
+    if "h_regime_d" not in out and "h_regime_d_tail" in out:
+        out["h_regime_d"] = out["h_regime_d_tail"]
+    if "far" not in out and "far_structural" in out:
+        out["far"] = out["far_structural"]
+    if "pv_penetration_pct_gen" not in out and "pv_share" in out:
+        out["pv_penetration_pct_gen"] = float(out["pv_share"]) * 100.0
+    if "wind_penetration_pct_gen" not in out and "wind_share" in out:
+        out["wind_penetration_pct_gen"] = float(out["wind_share"]) * 100.0
+    if "vre_penetration_pct_gen" not in out and "vre_share" in out:
+        out["vre_penetration_pct_gen"] = float(out["vre_share"]) * 100.0
+    return out
+
+
+def _metrics_schema_ok(metrics: dict | None) -> bool:
+    if not isinstance(metrics, dict):
+        return False
+    normalized = _normalize_metrics_legacy(metrics)
+    return _REQUIRED_METRICS_KEYS.issubset(set(normalized.keys()))
+
+
 def _load_one(country: str, year: int, s: dict):
     countries_cfg = s["countries_cfg"]
     thresholds = s["thresholds"]
@@ -106,15 +153,18 @@ def _load_one(country: str, year: int, s: dict):
         except FileNotFoundError:
             df_raw = None
 
+    # Always enforce v3 schema consistency: if cached metrics are legacy/incomplete,
+    # recompute from processed dataframe to avoid UI key errors.
     metrics = load_metrics(country, year, price_mode)
-    if metrics is None:
+    if not _metrics_schema_ok(metrics):
         metrics = compute_annual_metrics(df_proc, country, year, countries_cfg[country])
         save_metrics(metrics, country, year, price_mode)
+    else:
+        metrics = _normalize_metrics_legacy(metrics)
 
-    diag = load_diagnostics(country, year, price_mode)
-    if diag is None:
-        diag = diagnose_phase(metrics, thresholds)
-        save_diagnostics(diag, country, year, price_mode)
+    # Diagnostics are lightweight; recompute to stay aligned with thresholds + metric schema.
+    diag = diagnose_phase(metrics, thresholds)
+    save_diagnostics(diag, country, year, price_mode)
 
     return country, year, df_raw, df_proc, metrics, diag
 
@@ -149,6 +199,16 @@ def _load_selected_data(s: dict) -> None:
 
 _init_state()
 state = st.session_state.state
+
+# Session-safety: normalize any pre-existing legacy metrics keys in memory.
+if state.get("metrics"):
+    normalized_metrics = {}
+    for key, val in state["metrics"].items():
+        if isinstance(val, dict):
+            normalized_metrics[key] = _normalize_metrics_legacy(val)
+        else:
+            normalized_metrics[key] = val
+    state["metrics"] = normalized_metrics
 
 countries_cfg, thresholds, scenarios = _cached_configs()
 commodities = _cached_commodities()

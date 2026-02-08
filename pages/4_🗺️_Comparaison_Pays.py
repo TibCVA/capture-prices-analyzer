@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_engine import commentary_block
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="Comparaison pays", page_icon="🗺️", layout="wide")
 inject_global_css()
@@ -19,6 +19,7 @@ st.title("🗺️ Comparaison pays")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Comparaison pays")
+normalize_state_metrics(state)
 
 metrics = state["metrics"]
 if not metrics:

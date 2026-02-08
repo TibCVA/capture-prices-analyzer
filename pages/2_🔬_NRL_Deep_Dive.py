@@ -9,7 +9,7 @@ import streamlit as st
 
 from src.commentary_engine import commentary_block
 from src.constants import COL_FLEX_EFFECTIVE, COL_LOAD, COL_NRL, COL_PRICE_DA, COL_REGIME, COL_SURPLUS, COL_SURPLUS_UNABS, COL_VRE
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="NRL Deep Dive", page_icon="🔬", layout="wide")
 inject_global_css()
@@ -19,6 +19,7 @@ st.title("🔬 NRL Deep Dive")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page NRL Deep Dive")
+normalize_state_metrics(state)
 
 proc = state["processed"]
 if not proc:
@@ -33,6 +34,9 @@ if key not in proc:
 
 metrics = state["metrics"].get((country, year, state["price_mode"]), {})
 df = proc[key]
+for col in [COL_LOAD, COL_VRE, COL_NRL, COL_SURPLUS, COL_FLEX_EFFECTIVE, COL_SURPLUS_UNABS, COL_REGIME, COL_PRICE_DA]:
+    if col not in df.columns:
+        df[col] = float("nan")
 
 section("Traces horaires", "Load, VRE, NRL, surplus et flex")
 fig1 = go.Figure()

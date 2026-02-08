@@ -10,7 +10,7 @@ import streamlit as st
 from src.commentary_engine import comment_scenario_delta, commentary_block
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="Scenarios", page_icon="🔮", layout="wide")
 inject_global_css()
@@ -20,6 +20,7 @@ st.title("🔮 Scenarios")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Scenarios")
+normalize_state_metrics(state)
 
 proc = state["processed"]
 metrics_dict = state["metrics"]
@@ -60,7 +61,11 @@ params = {
 
 base_key = (country, year, state["must_run_mode"], state["flex_model_mode"], state["price_mode"])
 if base_key not in proc:
-    guard_no_data("la baseline scenario")
+    fallback = [k for k in proc.keys() if k[0] == country and k[1] == year]
+    if fallback:
+        base_key = sorted(fallback)[0]
+    else:
+        guard_no_data("la baseline scenario")
 
 if st.button("Executer scenario", type="primary"):
     with st.spinner("Calcul scenario..."):

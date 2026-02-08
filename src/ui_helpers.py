@@ -48,3 +48,34 @@ def section(title: str, subtitle: str | None = None) -> None:
     st.subheader(title)
     if subtitle:
         st.caption(subtitle)
+
+
+def normalize_metric_record(m: dict) -> dict:
+    out = dict(m)
+    if "h_negative_obs" not in out and "h_negative" in out:
+        out["h_negative_obs"] = out["h_negative"]
+    if "h_below_5_obs" not in out and "h_below_5" in out:
+        out["h_below_5_obs"] = out["h_below_5"]
+    if "h_regime_d" not in out and "h_regime_d_tail" in out:
+        out["h_regime_d"] = out["h_regime_d_tail"]
+    if "far" not in out and "far_structural" in out:
+        out["far"] = out["far_structural"]
+    if "pv_penetration_pct_gen" not in out and "pv_share" in out:
+        out["pv_penetration_pct_gen"] = float(out["pv_share"]) * 100.0
+    if "wind_penetration_pct_gen" not in out and "wind_share" in out:
+        out["wind_penetration_pct_gen"] = float(out["wind_share"]) * 100.0
+    if "vre_penetration_pct_gen" not in out and "vre_share" in out:
+        out["vre_penetration_pct_gen"] = float(out["vre_share"]) * 100.0
+    return out
+
+
+def normalize_state_metrics(state: dict | None) -> None:
+    if not state or "metrics" not in state or not isinstance(state["metrics"], dict):
+        return
+    normalized = {}
+    for key, val in state["metrics"].items():
+        if isinstance(val, dict):
+            normalized[key] = normalize_metric_record(val)
+        else:
+            normalized[key] = val
+    state["metrics"] = normalized

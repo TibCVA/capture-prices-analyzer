@@ -10,7 +10,7 @@ import streamlit as st
 
 from src.commentary_engine import comment_regression, commentary_block
 from src.slope_analysis import compute_slope
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="Capture Rates", page_icon="📈", layout="wide")
 inject_global_css()
@@ -20,6 +20,7 @@ st.title("📈 Capture Rates")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Capture Rates")
+normalize_state_metrics(state)
 
 metrics_dict = state["metrics"]
 proc = state["processed"]

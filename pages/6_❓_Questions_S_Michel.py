@@ -12,7 +12,7 @@ from src.commentary_engine import commentary_block
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
 
 st.set_page_config(page_title="Questions S. Michel", page_icon="❓", layout="wide")
 inject_global_css()
@@ -22,22 +22,55 @@ st.title("❓ Questions S. Michel")
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
     guard_no_data("la page Questions S. Michel")
+normalize_state_metrics(state)
 
 metrics = state["metrics"]
 proc = state["processed"]
 if not metrics:
     guard_no_data("la page Questions S. Michel")
 
+
+def _normalize_metrics_schema(m: dict) -> dict:
+    out = dict(m)
+    # Legacy compatibility mappings (Cloud/session cache safety)
+    if "h_negative_obs" not in out and "h_negative" in out:
+        out["h_negative_obs"] = out["h_negative"]
+    if "h_below_5_obs" not in out and "h_below_5" in out:
+        out["h_below_5_obs"] = out["h_below_5"]
+    if "h_regime_d" not in out and "h_regime_d_tail" in out:
+        out["h_regime_d"] = out["h_regime_d_tail"]
+    if "far" not in out and "far_structural" in out:
+        out["far"] = out["far_structural"]
+    if "pv_penetration_pct_gen" not in out and "pv_share" in out:
+        out["pv_penetration_pct_gen"] = float(out["pv_share"]) * 100.0
+    if "wind_penetration_pct_gen" not in out and "wind_share" in out:
+        out["wind_penetration_pct_gen"] = float(out["wind_share"]) * 100.0
+    if "vre_penetration_pct_gen" not in out and "vre_share" in out:
+        out["vre_penetration_pct_gen"] = float(out["vre_share"]) * 100.0
+    return out
+
+
 rows = []
 for (c, y, p), m in metrics.items():
     if p != state["price_mode"]:
         continue
     d = state["diagnostics"].get((c, y), {})
-    rows.append({"country": c, "year": y, **m, "phase": d.get("phase", "unknown")})
+    rows.append({"country": c, "year": y, **_normalize_metrics_schema(m), "phase": d.get("phase", "unknown")})
 
 df_all = pd.DataFrame(rows)
 if df_all.empty:
     guard_no_data("la page Questions S. Michel")
+
+required_cols = [
+    "sr",
+    "h_negative_obs",
+    "capture_ratio_pv",
+    "far",
+    "pv_penetration_pct_gen",
+]
+for col in required_cols:
+    if col not in df_all.columns:
+        df_all[col] = np.nan
 
 if state["exclude_2022"]:
     df_reg = df_all[df_all["year"] != 2022]
@@ -128,6 +161,10 @@ with tabs[3]:
     country = st.selectbox("Pays (Q4)", sorted(df_reg["country"].unique()), key="q4_country")
     year = int(df_reg[df_reg["country"] == country]["year"].max())
     base_key = (country, year, state["must_run_mode"], state["flex_model_mode"], state["price_mode"])
+    if base_key not in proc:
+        fallback = [k for k in proc.keys() if k[0] == country and k[1] == year]
+        if fallback:
+            base_key = sorted(fallback)[0]
     if base_key in proc:
         bess_grid = np.arange(0, 21, 2)
         out = []
