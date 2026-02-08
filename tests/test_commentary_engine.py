@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.commentary_engine import comment_kpi, so_what_block
+from src.commentary_engine import analysis_note, comment_kpi, so_what_block
 
 
 def test_so_what_block_format() -> None:
@@ -30,3 +30,27 @@ def test_comment_kpi_contains_core_ratios() -> None:
     assert "FAR" in txt
     assert "IR" in txt
     assert "TTL" in txt
+
+
+def test_analysis_note_contains_structured_sections() -> None:
+    txt = analysis_note(
+        title="Bloc",
+        objective="Objectif test",
+        reading="Lecture test",
+        findings="n=8; x=1.2",
+        implication="Implication test",
+        method="Methode test",
+        limits="Limites test",
+        n=8,
+        confidence=0.6,
+        decision_use="Decision test",
+    )
+
+    assert "Objectif de l'analyse" in txt
+    assert "Comment lire le graphique" in txt
+    assert "Constat chiffre" in txt
+    assert "Ce que cela signifie" in txt
+    assert "Pourquoi cette analyse sert a decider" in txt
+    assert "Lien methode" in txt
+    assert "Limites" in txt
+    assert "n=8" in txt

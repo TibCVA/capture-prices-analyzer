@@ -14,6 +14,7 @@ def _fmt_value(v) -> str:
 
 try:
     from src.commentary_engine import (
+        analysis_note,
         comment_kpi,
         comment_regression,
         comment_scenario_delta,
@@ -55,6 +56,32 @@ except Exception:
             f"- Pourquoi cette analyse sert a decider: {decision_txt}.\n"
             f"- Lien methode: {method_link}.\n"
             f"- Limites: {limits}."
+        )
+
+    def analysis_note(
+        title: str,
+        objective: str,
+        reading: str,
+        findings: str,
+        implication: str,
+        method: str,
+        limits: str,
+        n: int,
+        confidence: float | None = None,
+        decision_use: str | None = None,
+    ) -> str:
+        decision_txt = decision_use or "Utiliser ce resultat pour la priorisation des leviers."
+        suffix = f" Niveau de confiance={_fmt_value(confidence)}." if confidence is not None else ""
+        return (
+            f"**{title}**\n"
+            f"- Objectif de l'analyse: {objective}.\n"
+            f"- Comment lire le graphique: {reading}.\n"
+            f"- Constat chiffre: {findings}.\n"
+            f"- Ce que cela signifie: {implication}.\n"
+            f"- Pourquoi cette analyse sert a decider: {decision_txt}.\n"
+            f"- Lien methode: {method}.\n"
+            f"- Limites: {limits}.\n"
+            f"- Base de calcul: n={n}.{suffix}"
         )
 
     def comment_kpi(metrics: dict, label: str = "KPI") -> str:

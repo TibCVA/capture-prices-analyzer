@@ -12,10 +12,13 @@ from src.commentary_bridge import so_what_block
 from src.constants import (
     OUTLIER_YEARS,
 )
-from src.metrics import compute_annual_metrics
-from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
+from src.ui_analysis import (
+    compute_q4_bess_sweep,
+    compute_q4_plateau_diagnostics,
+    find_q4_stress_reference,
+)
 from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     challenge_block,
@@ -279,6 +282,11 @@ with tabs[2]:
 # ------------------------------------------------------------------
 with tabs[3]:
     question_banner("Q4 - Combien de batteries pour freiner la degradation ?")
+    dynamic_narrative(
+        "Reponse courte: un graphique plat n'indique pas automatiquement un bug. "
+        "Il peut signaler un systeme ou le surplus est deja absorbe sans besoin additionnel de BESS.",
+        severity="info",
+    )
 
     countries_q4 = sorted(df_reg["country"].dropna().unique())
     if not countries_q4:
@@ -294,29 +302,49 @@ with tabs[3]:
                 base_key = sorted(fallback)[0]
 
         if base_key in proc:
-            bess_grid = np.arange(0, 21, 2)
-            out = []
-            for x in bess_grid:
-                payload = {
-                    **state.get("ui_overrides", {}),
-                    "delta_bess_power_gw": float(x),
-                    "delta_bess_energy_gwh": float(x) * 4.0,
-                }
-                df_s = apply_scenario(
-                    df_base_processed=proc[base_key],
-                    country_key=country,
-                    year=year,
-                    country_cfg=state["countries_cfg"][country],
-                    thresholds=state["thresholds"],
-                    commodities=state["commodities"],
-                    scenario_params=payload,
-                    price_mode="synthetic",
-                )
-                m = compute_annual_metrics(df_s, country, year, state["countries_cfg"][country])
-                out.append({"delta_bess_power_gw": x, "far": m["far"], "h_regime_a": m["h_regime_a"]})
+            df_base = proc[base_key]
+            country_cfg = state["countries_cfg"][country]
+            thresholds_cfg = state["thresholds"]
+            commodities_cfg = state["commodities"]
+            ui_overrides = state.get("ui_overrides", {}) if isinstance(state.get("ui_overrides", {}), dict) else {}
 
-            out_df = pd.DataFrame(out)
+            baseline_diag = compute_q4_plateau_diagnostics(df_base)
+            st.markdown("#### Diagnostic physique du cas de reference")
+            baseline_table = pd.DataFrame(
+                [
+                    {
+                        "total_surplus_twh": baseline_diag.get("total_surplus_twh"),
+                        "total_surplus_unabs_twh": baseline_diag.get("total_surplus_unabs_twh"),
+                        "sink_non_bess_mean_mw": baseline_diag.get("sink_non_bess_mean_mw"),
+                        "bess_charge_twh": baseline_diag.get("bess_charge_twh"),
+                        "h_regime_a": baseline_diag.get("h_regime_a"),
+                        "far": baseline_diag.get("far"),
+                        "n_heures": baseline_diag.get("n_hours"),
+                    }
+                ]
+            )
+            st.dataframe(baseline_table, use_container_width=True, hide_index=True)
+
+            sweep_grid = np.arange(0, 21, 2, dtype=float)
+            out_df = compute_q4_bess_sweep(
+                df_base_processed=df_base,
+                country_key=country,
+                year=year,
+                country_cfg=country_cfg,
+                thresholds=thresholds_cfg,
+                commodities=commodities_cfg,
+                sweep_gw=sweep_grid.tolist(),
+                reference_overrides=ui_overrides,
+            )
             out_df = coerce_numeric_columns(out_df, ["delta_bess_power_gw", "far", "h_regime_a"])
+
+            is_plateau = False
+            if not out_df.empty:
+                is_plateau = (out_df["far"].nunique(dropna=False) == 1) and (
+                    out_df["h_regime_a"].nunique(dropna=False) == 1
+                )
+
+            st.markdown("#### Sweep BESS - cas de reference")
             fig = go.Figure()
             fig.add_trace(
                 go.Scatter(
@@ -338,7 +366,7 @@ with tabs[3]:
                 )
             )
             fig.update_layout(
-                height=400,
+                height=410,
                 xaxis_title="BESS supplementaire (GW)",
                 yaxis=dict(title="FAR"),
                 yaxis2=dict(title="h_regime_a", overlaying="y", side="right"),
@@ -349,22 +377,137 @@ with tabs[3]:
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(out_df, use_container_width=True, hide_index=True)
 
+            if is_plateau:
+                challenge_block(
+                    "Resultat plat physiquement normal",
+                    "FAR et h_regime_a restent constants sur tout le sweep. "
+                    "Ce cas indique souvent qu'il n'y a pas de surplus residuel a arbitrer.",
+                )
+
             render_commentary(
                 so_what_block(
-                    title="Q4 - Effet marginal du BESS",
-                    purpose="Les premiers GW de BESS reduisent en general plus vite les heures A; ensuite les gains marginaux diminuent.",
+                    title="Q4 - Lecture du cas de reference",
+                    purpose="Avant de conclure sur les batteries, verifier si le systeme presente un surplus non absorbe a traiter.",
                     observed={
-                        "far_start": float(out_df["far"].iloc[0]),
-                        "far_end": float(out_df["far"].iloc[-1]),
-                        "h_A_start": float(out_df["h_regime_a"].iloc[0]),
-                        "h_A_end": float(out_df["h_regime_a"].iloc[-1]),
+                        "far_start": float(out_df["far"].iloc[0]) if not out_df.empty else np.nan,
+                        "far_end": float(out_df["far"].iloc[-1]) if not out_df.empty else np.nan,
+                        "h_A_start": float(out_df["h_regime_a"].iloc[0]) if not out_df.empty else np.nan,
+                        "h_A_end": float(out_df["h_regime_a"].iloc[-1]) if not out_df.empty else np.nan,
+                        "surplus_unabs_twh_base": baseline_diag.get("total_surplus_unabs_twh"),
                     },
-                    method_link="Chaque point est un scenario complet recalcule (NRL->regimes->prix synth->metriques).",
-                    limits="Modele BESS simplifie (SoC deterministe, sans optimisation economique intra-jour detaillee).",
+                    method_link="Sweep deterministe +BESS sur reference courante, avec recalcul complet du pipeline.",
+                    limits="Un plateau peut etre normal si le surplus est deja absorbe par flex non-BESS.",
                     n=len(out_df),
-                    decision_use="Identifier une zone de dimensionnement cible avant saturation du rendement marginal.",
+                    decision_use="Eviter une conclusion erronee 'effet batterie nul' sans verifier la contrainte physique de depart.",
                 )
             )
+
+            st.markdown("#### Sensibilite sous stress (reference informative)")
+            stress_ref = find_q4_stress_reference(
+                df_base_processed=df_base,
+                country_key=country,
+                year=year,
+                country_cfg=country_cfg,
+                thresholds=thresholds_cfg,
+                commodities=commodities_cfg,
+                max_delta_pv_gw=40,
+                step_gw=2,
+                base_overrides=ui_overrides,
+            )
+
+            if not stress_ref.get("found", False):
+                st.info(
+                    "Aucun stress de reference n'a rendu l'effet BESS identifiable dans la grille 0..40 GW PV "
+                    "(pas de variation FAR/h_regime_a suffisante)."
+                )
+                tested_df = stress_ref.get("tested_grid")
+                if isinstance(tested_df, pd.DataFrame) and not tested_df.empty:
+                    st.dataframe(tested_df, use_container_width=True, hide_index=True)
+            else:
+                stress_delta = float(stress_ref.get("delta_pv_gw", np.nan))
+                dynamic_narrative(
+                    f"Stress retenu: delta_pv_gw={stress_delta:.1f}. "
+                    "Cette reference cree une contrainte suffisante pour mesurer l'effet marginal du BESS.",
+                    severity="success",
+                )
+                stress_diag = stress_ref.get("diagnostics") or {}
+                stress_metrics = stress_ref.get("metrics") or {}
+                stress_table = pd.DataFrame(
+                    [
+                        {
+                            "delta_pv_gw_reference": stress_delta,
+                            "far_reference": stress_metrics.get("far"),
+                            "h_regime_a_reference": stress_metrics.get("h_regime_a"),
+                            "sr_reference": stress_metrics.get("sr"),
+                            "total_surplus_twh_reference": stress_diag.get("total_surplus_twh"),
+                            "total_surplus_unabs_twh_reference": stress_diag.get("total_surplus_unabs_twh"),
+                        }
+                    ]
+                )
+                st.dataframe(stress_table, use_container_width=True, hide_index=True)
+
+                df_ref = stress_ref.get("df_reference")
+                if isinstance(df_ref, pd.DataFrame) and not df_ref.empty:
+                    stress_sweep = compute_q4_bess_sweep(
+                        df_base_processed=df_ref,
+                        country_key=country,
+                        year=year,
+                        country_cfg=country_cfg,
+                        thresholds=thresholds_cfg,
+                        commodities=commodities_cfg,
+                        sweep_gw=sweep_grid.tolist(),
+                        reference_overrides={},
+                    )
+                    stress_sweep = coerce_numeric_columns(stress_sweep, ["delta_bess_power_gw", "far", "h_regime_a"])
+
+                    fig_s = go.Figure()
+                    fig_s.add_trace(
+                        go.Scatter(
+                            x=stress_sweep["delta_bess_power_gw"],
+                            y=stress_sweep["far"],
+                            mode="lines+markers",
+                            name="FAR (stress)",
+                            line=dict(color="#0f766e", width=2.3),
+                        )
+                    )
+                    fig_s.add_trace(
+                        go.Scatter(
+                            x=stress_sweep["delta_bess_power_gw"],
+                            y=stress_sweep["h_regime_a"],
+                            mode="lines+markers",
+                            name="h_regime_a (stress)",
+                            yaxis="y2",
+                            line=dict(color="#b91c1c", width=2.3, dash="dash"),
+                        )
+                    )
+                    fig_s.update_layout(
+                        height=410,
+                        xaxis_title="BESS supplementaire (GW)",
+                        yaxis=dict(title="FAR (stress)"),
+                        yaxis2=dict(title="h_regime_a (stress)", overlaying="y", side="right"),
+                        **PLOTLY_LAYOUT_DEFAULTS,
+                    )
+                    fig_s.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+                    fig_s.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+                    st.plotly_chart(fig_s, use_container_width=True)
+                    st.dataframe(stress_sweep, use_container_width=True, hide_index=True)
+
+                    render_commentary(
+                        so_what_block(
+                            title="Q4 - Effet marginal du BESS sous stress",
+                            purpose="Sous contrainte de surplus, la courbe montre le gain effectivement attribuable au BESS.",
+                            observed={
+                                "far_start_stress": float(stress_sweep["far"].iloc[0]) if not stress_sweep.empty else np.nan,
+                                "far_end_stress": float(stress_sweep["far"].iloc[-1]) if not stress_sweep.empty else np.nan,
+                                "h_A_start_stress": float(stress_sweep["h_regime_a"].iloc[0]) if not stress_sweep.empty else np.nan,
+                                "h_A_end_stress": float(stress_sweep["h_regime_a"].iloc[-1]) if not stress_sweep.empty else np.nan,
+                            },
+                            method_link="Stress minimal identifie puis sweep BESS sur reference stress, sans aleatoire.",
+                            limits="Sensibilite dependante des hypotheses actives (must-run, flex capacity, prix synthetique).",
+                            n=len(stress_sweep),
+                            decision_use="Dimensionner le BESS dans une zone ou l'effet marginal est visible et mesurable.",
+                        )
+                    )
         else:
             st.info("Q4 indisponible: baseline process absente.")
 

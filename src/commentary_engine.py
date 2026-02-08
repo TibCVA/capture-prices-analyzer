@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Mapping
 
 import numpy as np
@@ -25,6 +26,49 @@ def _format_observed(observed: Mapping[str, float | int | None]) -> str:
     return ", ".join(f"{k}={_fmt(v)}" for k, v in observed.items())
 
 
+def analysis_note(
+    title: str,
+    objective: str,
+    reading: str,
+    findings: str,
+    implication: str,
+    method: str,
+    limits: str,
+    n: int,
+    confidence: float | None = None,
+    decision_use: str | None = None,
+) -> str:
+    """Return a structured HTML note for clean and readable UI commentary."""
+
+    decision_txt = decision_use or "Prioriser les leviers selon les effets mesures."
+    confidence_block = ""
+    if confidence is not None:
+        try:
+            conf = float(confidence)
+            if np.isfinite(conf):
+                confidence_block = (
+                    "<p><strong>Niveau de confiance.</strong> "
+                    f"{html.escape(f'{conf:.2f}')}.</p>"
+                )
+        except Exception:
+            confidence_block = ""
+
+    return (
+        "<div class='analysis-note'>"
+        f"<p><strong>{html.escape(title)}</strong></p>"
+        f"<p><strong>Objectif de l'analyse.</strong> {html.escape(objective)}</p>"
+        f"<p><strong>Comment lire le graphique.</strong> {html.escape(reading)}</p>"
+        f"<p><strong>Constat chiffre.</strong> {html.escape(findings)}</p>"
+        f"<p><strong>Ce que cela signifie.</strong> {html.escape(implication)}</p>"
+        f"<p><strong>Pourquoi cette analyse sert a decider.</strong> {html.escape(decision_txt)}</p>"
+        f"<p><strong>Lien methode.</strong> {html.escape(method)}</p>"
+        f"<p><strong>Limites.</strong> {html.escape(limits)}</p>"
+        f"<p><strong>Base de calcul.</strong> n={int(n)} observations.</p>"
+        f"{confidence_block}"
+        "</div>"
+    )
+
+
 def so_what_block(
     title: str,
     purpose: str,
@@ -42,24 +86,18 @@ def so_what_block(
     implication_txt = implication or purpose
     decision_txt = decision_use or "Prioriser les leviers a activer et calibrer les hypotheses de scenario."
 
-    lines = [
-        f"**{title}**",
-        f"- Constat chiffre: n={int(n)}; {observed_str}.",
-        f"- Ce que cela signifie: {implication_txt}.",
-        f"- Pourquoi cette analyse sert a decider: {decision_txt}.",
-        f"- Lien methode: {method_link}.",
-        f"- Limites: {limits}.",
-    ]
-
-    if confidence is not None:
-        try:
-            conf_val = float(confidence)
-            if np.isfinite(conf_val):
-                lines.append(f"- Niveau de confiance: {conf_val:.2f}.")
-        except Exception:
-            pass
-
-    return "\n".join(lines)
+    return analysis_note(
+        title=title,
+        objective=purpose,
+        reading="Lire les variables affichees, verifier leur niveau, puis les relier aux seuils de la methode.",
+        findings=f"n={int(n)}; {observed_str}.",
+        implication=implication_txt,
+        method=method_link,
+        limits=limits,
+        n=n,
+        confidence=confidence,
+        decision_use=decision_txt,
+    )
 
 
 def commentary_block(
@@ -158,3 +196,4 @@ def comment_scenario_delta(base: dict, scen: dict) -> str:
         n=1,
         decision_use="Arbitrer entre leviers (BESS, demande, must-run, commodites) sur des effets mesurables.",
     )
+

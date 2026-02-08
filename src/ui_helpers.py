@@ -53,7 +53,7 @@ GLOBAL_CSS = """
         background: #f8fafc;
         border-left: 4px solid #0f766e;
         border-radius: 0 8px 8px 0;
-        padding: 0.86rem 1.02rem;
+        padding: 0.92rem 1.06rem;
         margin: 0.44rem 0 1rem 0;
         color: #1f2937;
         line-height: 1.5;
@@ -139,6 +139,11 @@ GLOBAL_CSS = """
     .kpi-banner .label { font-size: 0.84rem; color: #475569; font-weight: 620; letter-spacing: 0.08px; }
     .kpi-banner .value { font-size: 1.55rem; color: #0f172a; font-weight: 720; line-height: 1.18; margin-top: 0.08rem; }
     .kpi-banner .subtitle { font-size: 0.83rem; color: #334155; margin-top: 0.18rem; line-height: 1.35; }
+
+    .analysis-note p {
+        margin: 0.22rem 0;
+        line-height: 1.5;
+    }
 </style>
 """
 
@@ -191,7 +196,15 @@ def render_commentary(md_text: str, variant: str = "analysis") -> None:
         "method": "commentary-box-method",
         "warning": "commentary-box-warning",
     }.get(variant, "commentary-box-analysis")
-    st.markdown(f'<div class="{css}">{md_text}</div>', unsafe_allow_html=True)
+    if "<" in md_text and ">" in md_text:
+        body = md_text
+    else:
+        body = html.escape(md_text).replace("\n", "<br>")
+    st.markdown(f'<div class="{css}">{body}</div>', unsafe_allow_html=True)
+
+
+def render_analysis_note(md_text: str, variant: str = "analysis") -> None:
+    render_commentary(md_text, variant=variant)
 
 
 def render_kpi_banner(title: str, value: str, subtitle: str = "", status: str = "unknown") -> None:
@@ -239,6 +252,7 @@ __all__ = [
     "info_card",
     "narrative",
     "render_commentary",
+    "render_analysis_note",
     "render_kpi_banner",
     "question_banner",
     "dynamic_narrative",
@@ -246,4 +260,3 @@ __all__ = [
     "normalize_metrics_record",
     "normalize_state_metrics",
 ]
-
