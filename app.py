@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 import pandas as pd
 import streamlit as st
@@ -10,7 +11,6 @@ from dotenv import load_dotenv
 
 from src.commentary_bridge import comment_kpi, so_what_block
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
-from src.data_fetcher import fetch_country_year
 import src.data_loader as _data_loader
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
@@ -90,7 +90,24 @@ def _init_state() -> None:
             "thresholds": None,
             "scenarios": None,
             "ui_overrides": {},
+            "entsoe_api_key": "",
         }
+
+
+def _read_secret_api_key() -> str:
+    try:
+        secrets = st.secrets
+    except Exception:
+        return ""
+
+    for key in ("ENTSOE_API_KEY", "entsoe_api_key"):
+        try:
+            value = secrets[key]
+        except Exception:
+            continue
+        if value:
+            return str(value).strip()
+    return ""
 
 
 @st.cache_data(show_spinner=False)
@@ -146,7 +163,9 @@ def _load_one(country: str, year: int, s: dict):
         try:
             df_raw = load_raw(country, year)
         except FileNotFoundError:
-            df_raw = fetch_country_year(country, year, countries_cfg=countries_cfg, force=False)
+            raise FileNotFoundError(
+                f"Raw cache introuvable pour {country}/{year} (mode cache-only: aucun fetch ENTSO-E)."
+            )
         df_raw = ensure_raw_minimum_columns(df_raw, country, year)
 
         df_proc = compute_nrl(
@@ -186,18 +205,26 @@ def _load_one(country: str, year: int, s: dict):
     return country, year, df_raw, df_proc, metrics, diag
 
 
-def _load_selected_data(s: dict) -> None:
+def _load_selected_data(s: dict) -> bool:
     countries = s["countries_selected"]
     y0, y1 = s["year_range"]
     tasks = [(c, y) for c in countries for y in range(y0, y1 + 1)]
 
     progress = st.progress(0.0, text="Chargement des donnees...")
     done = 0
+    success = 0
+    errors: list[str] = []
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futs = [pool.submit(_load_one, c, y, s) for (c, y) in tasks]
         for fut in as_completed(futs):
-            country, year, df_raw, df_proc, metrics, diag = fut.result()
+            try:
+                country, year, df_raw, df_proc, metrics, diag = fut.result()
+            except Exception as exc:
+                errors.append(str(exc))
+                done += 1
+                progress.progress(done / max(1, len(tasks)), text=f"Erreur ({done}/{len(tasks)})")
+                continue
 
             if df_raw is not None:
                 s["raw"][(country, year)] = df_raw
@@ -207,11 +234,29 @@ def _load_selected_data(s: dict) -> None:
             s["metrics"][(country, year, s["price_mode"])] = normalize_metrics_record(metrics)
             s["diagnostics"][(country, year)] = diag
 
+            success += 1
             done += 1
             progress.progress(done / max(1, len(tasks)), text=f"{country} {year} ({done}/{len(tasks)})")
 
-    s["data_loaded"] = True
-    progress.progress(1.0, text="Termine")
+    s["data_loaded"] = success > 0
+    progress.progress(1.0, text="Termine" if success > 0 else "Aucune donnee chargee")
+
+    if errors:
+        uniq = sorted(set(errors))
+        if any("mode cache-only" in e for e in uniq):
+            st.error(
+                "Chargement partiel: certains couples pays/annee ne sont pas disponibles dans les caches locaux "
+                "(aucun rechargement ENTSO-E n'est effectue)."
+            )
+        else:
+            st.error("Certaines series n'ont pas pu etre chargees.")
+        with st.expander("Details techniques du chargement"):
+            for e in uniq[:20]:
+                st.code(e)
+            if len(uniq) > 20:
+                st.caption(f"... {len(uniq) - 20} erreurs supplementaires non affichees")
+
+    return success > 0
 
 
 _init_state()
@@ -239,6 +284,7 @@ if (
 
 with st.sidebar:
     st.markdown("#### Capture Prices Analyzer")
+    st.caption("Mode donnees: cache local uniquement (aucun fetch ENTSO-E)")
 
     st.markdown("**Selection**")
     state["countries_selected"] = st.multiselect(
