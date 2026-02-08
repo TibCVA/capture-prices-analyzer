@@ -338,6 +338,9 @@ def _q4_battery_analysis(
     countries_cfg: dict,
     thresholds: dict,
     commodities: dict,
+    must_run_mode: str,
+    flex_model_mode: str,
+    price_mode: str,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
     summary_rows: list[dict] = []
     baseline_sweeps: dict[str, pd.DataFrame] = {}
@@ -363,6 +366,9 @@ def _q4_battery_analysis(
             commodities=commodities,
             sweep_gw=sweep_grid,
             reference_overrides={},
+            must_run_mode=must_run_mode,
+            flex_model_mode=flex_model_mode,
+            price_mode=price_mode,
         )
         baseline_sweeps[country] = sweep_base
         plateau = (not sweep_base.empty) and (
@@ -379,6 +385,9 @@ def _q4_battery_analysis(
             max_delta_pv_gw=40,
             step_gw=2,
             base_overrides={},
+            must_run_mode=must_run_mode,
+            flex_model_mode=flex_model_mode,
+            price_mode=price_mode,
         )
 
         stress_found = bool(stress.get("found", False))
@@ -398,6 +407,9 @@ def _q4_battery_analysis(
                 commodities=commodities,
                 sweep_gw=sweep_grid,
                 reference_overrides={},
+                must_run_mode=must_run_mode,
+                flex_model_mode=flex_model_mode,
+                price_mode=price_mode,
             )
             stress_sweeps[country] = sweep_stress
             if not sweep_stress.empty:
@@ -691,6 +703,9 @@ def run_excesum_baseline(
         countries_cfg=countries_cfg,
         thresholds=thresholds,
         commodities=commodities,
+        must_run_mode=cfg.must_run_mode,
+        flex_model_mode=cfg.flex_model_mode,
+        price_mode=cfg.price_mode,
     )
     q5_df = _q5_commodity_stress(
         metrics_df=metrics_df,

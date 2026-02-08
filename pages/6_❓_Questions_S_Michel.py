@@ -66,6 +66,9 @@ except Exception:
         max_delta_pv_gw: float = 40,
         step_gw: float = 2,
         base_overrides: dict | None = None,
+        must_run_mode: str = "floor",
+        flex_model_mode: str = "capacity",
+        price_mode: str = "synthetic",
     ) -> dict:
         tested_rows: list[dict] = []
         overrides = dict(base_overrides or {})
@@ -84,7 +87,9 @@ except Exception:
                 thresholds=thresholds,
                 commodities=commodities,
                 scenario_params=params,
-                price_mode="synthetic",
+                price_mode=price_mode,
+                must_run_mode=must_run_mode,
+                flex_model_mode=flex_model_mode,
             )
             m = compute_annual_metrics(df_s, country_key, year, country_cfg)
             tested_rows.append(
@@ -134,6 +139,9 @@ except Exception:
         commodities: dict,
         sweep_gw: list[float],
         reference_overrides: dict | None,
+        must_run_mode: str = "floor",
+        flex_model_mode: str = "capacity",
+        price_mode: str = "synthetic",
     ) -> pd.DataFrame:
         rows = []
         base_overrides = dict(reference_overrides or {})
@@ -150,7 +158,9 @@ except Exception:
                 thresholds=thresholds,
                 commodities=commodities,
                 scenario_params=params,
-                price_mode="synthetic",
+                price_mode=price_mode,
+                must_run_mode=must_run_mode,
+                flex_model_mode=flex_model_mode,
             )
             m = compute_annual_metrics(df_s, country_key, year, country_cfg)
             rows.append(
@@ -461,6 +471,9 @@ with tabs[3]:
             thresholds_cfg = state["thresholds"]
             commodities_cfg = state["commodities"]
             ui_overrides = state.get("ui_overrides", {}) if isinstance(state.get("ui_overrides", {}), dict) else {}
+            q4_mr_mode = str(state.get("must_run_mode", "observed"))
+            q4_flex_mode = str(state.get("flex_model_mode", "observed"))
+            q4_price_mode = str(state.get("price_mode", "observed"))
 
             baseline_diag = compute_q4_plateau_diagnostics(df_base)
             st.markdown("#### Diagnostic physique du cas de reference")
@@ -489,6 +502,9 @@ with tabs[3]:
                 commodities=commodities_cfg,
                 sweep_gw=sweep_grid.tolist(),
                 reference_overrides=ui_overrides,
+                must_run_mode=q4_mr_mode,
+                flex_model_mode=q4_flex_mode,
+                price_mode=q4_price_mode,
             )
             out_df = coerce_numeric_columns(out_df, ["delta_bess_power_gw", "far", "h_regime_a"])
 
@@ -569,6 +585,9 @@ with tabs[3]:
                 max_delta_pv_gw=40,
                 step_gw=2,
                 base_overrides=ui_overrides,
+                must_run_mode=q4_mr_mode,
+                flex_model_mode=q4_flex_mode,
+                price_mode=q4_price_mode,
             )
 
             if not stress_ref.get("found", False):
@@ -581,11 +600,18 @@ with tabs[3]:
                     st.dataframe(tested_df, use_container_width=True, hide_index=True)
             else:
                 stress_delta = float(stress_ref.get("delta_pv_gw", np.nan))
-                dynamic_narrative(
-                    f"Stress retenu: delta_pv_gw={stress_delta:.1f}. "
-                    "Cette reference cree une contrainte suffisante pour mesurer l'effet marginal du BESS.",
-                    severity="success",
-                )
+                if np.isfinite(stress_delta) and abs(stress_delta) <= 1e-9:
+                    dynamic_narrative(
+                        "Aucun ajout PV n'est requis: l'effet marginal du BESS est deja identifiable "
+                        "dans le cas de reference (delta_pv_gw=0.0).",
+                        severity="success",
+                    )
+                else:
+                    dynamic_narrative(
+                        f"Stress retenu: delta_pv_gw={stress_delta:.1f}. "
+                        "Cette reference cree une contrainte suffisante pour mesurer l'effet marginal du BESS.",
+                        severity="success",
+                    )
                 stress_diag = stress_ref.get("diagnostics") or {}
                 stress_metrics = stress_ref.get("metrics") or {}
                 stress_table = pd.DataFrame(
@@ -613,6 +639,9 @@ with tabs[3]:
                         commodities=commodities_cfg,
                         sweep_gw=sweep_grid.tolist(),
                         reference_overrides={},
+                        must_run_mode=q4_mr_mode,
+                        flex_model_mode=q4_flex_mode,
+                        price_mode=q4_price_mode,
                     )
                     stress_sweep = coerce_numeric_columns(stress_sweep, ["delta_bess_power_gw", "far", "h_regime_a"])
 

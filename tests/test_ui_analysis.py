@@ -101,6 +101,34 @@ def _base_processed_df() -> pd.DataFrame:
     )
 
 
+def _surplus_base_processed_df() -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01", periods=72, freq="h", tz="UTC")
+    h = np.arange(len(idx))
+    solar = np.maximum(0.0, np.sin((h % 24 - 6) / 24 * np.pi * 2)) * 1800.0
+    wind_on = np.full(len(idx), 400.0)
+    load = np.full(len(idx), 800.0)
+    nrl = load - (solar + wind_on)
+    surplus = np.maximum(0.0, -nrl)
+    regime = np.where(surplus > 0.0, "A", "C")
+
+    return pd.DataFrame(
+        {
+            COL_LOAD: load,
+            COL_SOLAR: solar,
+            COL_WIND_ON: wind_on,
+            COL_WIND_OFF: 0.0,
+            COL_PRICE_DA: 55.0,
+            COL_NRL: nrl,
+            COL_SURPLUS: surplus,
+            COL_SURPLUS_UNABS: surplus,
+            COL_SINK_NON_BESS: 0.0,
+            COL_BESS_CHARGE: 0.0,
+            COL_REGIME: regime,
+        },
+        index=idx,
+    )
+
+
 def test_compute_nrl_price_link_stats_returns_core_fields() -> None:
     idx = pd.date_range("2024-01-01", periods=10, freq="h", tz="UTC")
     df = pd.DataFrame(
@@ -177,6 +205,28 @@ def test_find_q4_stress_reference_identifies_reference() -> None:
     assert not out["tested_grid"].empty
 
 
+def test_find_q4_stress_reference_zero_delta_when_effect_already_visible() -> None:
+    out = find_q4_stress_reference(
+        df_base_processed=_surplus_base_processed_df(),
+        country_key="FR",
+        year=2024,
+        country_cfg=_country_cfg(),
+        thresholds=_thresholds(),
+        commodities=_commodities(),
+        max_delta_pv_gw=20,
+        step_gw=2,
+        must_run_mode="observed",
+        flex_model_mode="observed",
+        price_mode="observed",
+    )
+    assert out["found"] is True
+    assert np.isclose(float(out["delta_pv_gw"]), 0.0)
+    metrics = out["metrics"] or {}
+    far = float(metrics.get("far", np.nan))
+    h_a = float(metrics.get("h_regime_a", np.nan))
+    assert (np.isfinite(h_a) and h_a > 0.0) or (np.isfinite(far) and far < 0.995)
+
+
 def test_compute_q4_bess_sweep_returns_expected_columns() -> None:
     df_sweep = compute_q4_bess_sweep(
         df_base_processed=_base_processed_df(),
@@ -192,4 +242,3 @@ def test_compute_q4_bess_sweep_returns_expected_columns() -> None:
     assert {"delta_bess_power_gw", "far", "h_regime_a", "total_surplus_unabs_twh"}.issubset(df_sweep.columns)
     assert len(df_sweep) == 4
     assert np.isfinite(df_sweep["delta_bess_power_gw"]).all()
-

@@ -412,14 +412,17 @@ with tabs[4]:
 
     narrative(
         "Le diagnostic teste l'effet de l'ajout de BESS en baseline (2024). "
-        "Si la flex existante absorbe deja tout le surplus, le FAR est a 1.0 et h_regime_a a 0 : "
-        "ajouter du BESS ne change rien. C'est le 'plateau'. "
-        "Pour voir un effet BESS, il faut d'abord ajouter du PV supplementaire "
-        "pour creer du surplus residuel."
+        "Deux cas existent: (1) si le surplus residuel est deja present (FAR < 1 ou h_regime_a > 0), "
+        "l'effet marginal du BESS est observable sans ajout PV (delta=0) ; "
+        "(2) si le surplus est deja integralement absorbe (FAR=1 et h_regime_a=0), "
+        "un stress PV additionnel peut etre requis pour rendre l'effet observable."
     )
 
     if not df_q4.empty:
-        st.caption("Delta PV additionnel (GW) necessaire pour observer un effet BESS par pays")
+        st.caption(
+            "Delta PV additionnel (GW) necessaire pour observer un effet BESS par pays "
+            "(0 GW = effet deja observable en baseline)."
+        )
         df_q4_sorted = df_q4.sort_values("stress_delta_pv_gw")
         fig_q4 = px.bar(
             df_q4_sorted,
@@ -431,7 +434,7 @@ with tabs[4]:
         fig_q4.update_layout(
             height=420,
             xaxis_title="Pays",
-            yaxis_title="Delta PV additionnel (GW) pour effet BESS",
+            yaxis_title="Delta PV additionnel (GW) pour effet BESS (0 = deja visible)",
             showlegend=False,
             **PLOTLY_LAYOUT_DEFAULTS,
         )
@@ -446,25 +449,35 @@ with tabs[4]:
             far_b = row.get("far_baseline", 0)
             ha_b = row.get("h_regime_a_baseline", 0)
             stress_gw = row.get("stress_delta_pv_gw", 0)
+            try:
+                stress_gw_f = float(stress_gw)
+            except Exception:
+                stress_gw_f = float("nan")
+            stress_needs_extra_pv = bool(np.isfinite(stress_gw_f) and stress_gw_f > 1e-9)
+            stress_text = (
+                f"Il faut +{int(round(stress_gw_f))} GW de PV additionnel pour rendre l'effet marginal du BESS observable."
+                if stress_needs_extra_pv
+                else "L'effet marginal du BESS est deja observable en baseline (delta PV requis = 0 GW)."
+            )
 
             if surplus > 1.0:
                 interpretation = (
                     f"Surplus non absorbe = **{_sf(surplus, '.2f')} TWh** ({int(ha_b)} h en regime A). "
                     f"FAR = {_sf(far_b, '.3f')} : la flex ne couvre que {_sf(far_b, '.1%')} du surplus. "
                     f"Le BESS a un role structurel potentiel. "
-                    f"Il faut +{int(stress_gw)} GW de PV additionnel pour que l'effet marginal du BESS soit visible."
+                    f"{stress_text}"
                 )
             elif surplus > 0.01:
                 interpretation = (
                     f"Petit surplus residuel = **{_sf(surplus, '.3f')} TWh** ({int(ha_b)} h en regime A). "
                     f"Le BESS a un role marginal en baseline. "
-                    f"+{int(stress_gw)} GW de PV sont necessaires pour un effet visible."
+                    f"{stress_text}"
                 )
             else:
                 interpretation = (
                     f"Aucun surplus residuel significatif (FAR = {_sf(far_b, '.3f')}). "
                     f"La flex existante absorbe deja tout. "
-                    f"Il faut ajouter **+{int(stress_gw)} GW** de PV pour que le BESS devienne utile."
+                    f"{stress_text}"
                 )
 
             st.markdown(f"**{c}** : {interpretation}")
@@ -488,9 +501,8 @@ with tabs[4]:
 
         challenge_block(
             "Plateau BESS = resultat physiquement normal",
-            "Dans le sweep baseline, si le surplus est deja absorbe par la flex existante, "
-            "ajouter du BESS ne change rien (FAR reste a 1.0, h_regime_a reste a 0). "
-            "Ce n'est pas un bug. Il faut un stress PV additionnel pour creer du surplus residuel.",
+            "Quand le surplus est deja absorbe par la flex existante, ajouter du BESS ne change pas FAR ni h_regime_a. "
+            "Ce n'est pas un bug. Dans ce cas uniquement, un stress PV additionnel peut etre necessaire.",
         )
 
 
@@ -676,6 +688,12 @@ with tabs[7]:
             surplus_v = float(q4_data.get("surplus_unabs_twh_baseline", 0))
             h_neg_slope = float(q3_data.get("h_negative_slope_per_year", 0))
             stress_pv = float(q4_data.get("stress_delta_pv_gw", 0))
+            if np.isfinite(stress_pv) and stress_pv > 1e-9:
+                q4_stress_text = (
+                    f"+{int(round(stress_pv))} GW de PV additionnel necessaires pour rendre l'effet BESS observable."
+                )
+            else:
+                q4_stress_text = "0 GW additionnel requis: l'effet BESS est deja observable en baseline."
             d_co2 = float(row.get("q5_delta_ttl_co2", 0))
             d_gas = float(row.get("q5_delta_ttl_gas", 0))
             first_yr = row.get("q1_first_stage2_year")
@@ -739,7 +757,7 @@ Pente h_neg = +{_sf(h_neg_slope, '.1f')} h/an (en hausse, condition de detente n
 Regle bloquante : `{blocked}`.
 
 **Q4 — Effet BESS** : Surplus non absorbe = **{_sf(surplus_v, '.2f')} TWh**.
-Stress PV necessaire pour observer un effet BESS = +{int(stress_pv)} GW.
+{q4_stress_text}
 
 **Q5 — Sensibilite commodites** : Delta TTL CO2 = +{_sf(d_co2, '.0f')} EUR/MWh.
 Delta TTL gaz = +{_sf(d_gas, '.0f')} EUR/MWh.

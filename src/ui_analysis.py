@@ -165,6 +165,9 @@ def find_q4_stress_reference(
     max_delta_pv_gw: float = 40,
     step_gw: float = 2,
     base_overrides: dict | None = None,
+    must_run_mode: str = "floor",
+    flex_model_mode: str = "capacity",
+    price_mode: str = "synthetic",
 ) -> dict:
     """Find the minimum deterministic PV stress where BESS effect becomes identifiable."""
 
@@ -183,7 +186,9 @@ def find_q4_stress_reference(
             thresholds=thresholds,
             commodities=commodities,
             scenario_params=scenario_params,
-            price_mode="synthetic",
+            price_mode=price_mode,
+            must_run_mode=must_run_mode,
+            flex_model_mode=flex_model_mode,
         )
         m = compute_annual_metrics(df_s, country_key, year, country_cfg)
         return df_s, m
@@ -244,6 +249,9 @@ def compute_q4_bess_sweep(
     commodities: dict,
     sweep_gw: Sequence[float],
     reference_overrides: dict | None,
+    must_run_mode: str = "floor",
+    flex_model_mode: str = "capacity",
+    price_mode: str = "synthetic",
 ) -> pd.DataFrame:
     """Run deterministic Q4 battery sweep on a chosen reference case."""
 
@@ -265,7 +273,9 @@ def compute_q4_bess_sweep(
             thresholds=thresholds,
             commodities=commodities,
             scenario_params=params,
-            price_mode="synthetic",
+            price_mode=price_mode,
+            must_run_mode=must_run_mode,
+            flex_model_mode=flex_model_mode,
         )
         m = compute_annual_metrics(df_s, country_key, year, country_cfg)
         rows.append(

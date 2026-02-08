@@ -91,10 +91,14 @@ def q4_text(q4_df: pd.DataFrame) -> str:
         return "Q4: analyse batterie indisponible."
     plateau = int(q4_df["plateau_baseline"].fillna(False).sum())
     stress = int(q4_df["stress_found"].fillna(False).sum())
+    delta = pd.to_numeric(q4_df.get("stress_delta_pv_gw"), errors="coerce")
+    zero_delta = int(((delta.fillna(np.nan).abs() <= 1e-9) & q4_df["stress_found"].fillna(False)).sum())
+    positive_delta = int(((delta.fillna(np.nan) > 1e-9) & q4_df["stress_found"].fillna(False)).sum())
     total = int(len(q4_df))
     return (
-        f"Q4: plateau baseline sur {plateau}/{total} pays. Un stress de reference permettant d'identifier un effet "
-        f"marginal du BESS a ete trouve sur {stress}/{total} pays."
+        f"Q4: plateau baseline sur {plateau}/{total} pays. Effet BESS deja identifiable en baseline "
+        f"(delta PV=0) sur {zero_delta}/{total} pays; stress PV additionnel requis sur {positive_delta}/{total}. "
+        f"Reference exploitable au total sur {stress}/{total} pays."
     )
 
 

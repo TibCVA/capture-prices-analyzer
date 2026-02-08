@@ -67,6 +67,8 @@ def apply_scenario(
     commodities: dict,
     scenario_params: dict,
     price_mode: str = "synthetic",
+    must_run_mode: str | None = None,
+    flex_model_mode: str | None = None,
 ) -> pd.DataFrame:
     """Apply deterministic scenario perturbations and recompute full pipeline."""
 
@@ -126,8 +128,11 @@ def apply_scenario(
     if COL_PRICE_DA not in raw.columns:
         raw[COL_PRICE_DA] = np.nan
 
-    # Full recompute in scenario default modes
-    # By spec: scenario defaults should be must_run=floor and flex=capacity.
+    # Full recompute in scenario modes.
+    # By spec default: must_run=floor and flex=capacity.
+    mr_mode = must_run_mode or "floor"
+    fx_mode = flex_model_mode or "capacity"
+
     result = compute_nrl(
         df_raw=raw,
         country_key=country_key,
@@ -135,8 +140,8 @@ def apply_scenario(
         country_cfg=country_cfg,
         thresholds=thresholds,
         commodities=commodities,
-        must_run_mode="floor",
-        flex_model_mode="capacity",
+        must_run_mode=mr_mode,
+        flex_model_mode=fx_mode,
         scenario_overrides=scenario_params,
         price_mode=price_mode,
     )
