@@ -12,13 +12,163 @@ from src.commentary_bridge import so_what_block
 from src.constants import (
     OUTLIER_YEARS,
 )
+from src.metrics import compute_annual_metrics
+from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
-from src.ui_analysis import (
-    compute_q4_bess_sweep,
-    compute_q4_plateau_diagnostics,
-    find_q4_stress_reference,
-)
+try:
+    from src.ui_analysis import (
+        compute_q4_bess_sweep,
+        compute_q4_plateau_diagnostics,
+        find_q4_stress_reference,
+    )
+except Exception:
+    # Backward-compatible fallback for deployments where src.ui_analysis
+    # is present but does not yet expose the new Q4 helpers.
+    def compute_q4_plateau_diagnostics(df_scenario_base: pd.DataFrame) -> dict:
+        if not isinstance(df_scenario_base, pd.DataFrame) or df_scenario_base.empty:
+            return {
+                "total_surplus_twh": float("nan"),
+                "total_surplus_unabs_twh": float("nan"),
+                "sink_non_bess_mean_mw": float("nan"),
+                "bess_charge_twh": float("nan"),
+                "h_regime_a": float("nan"),
+                "far": float("nan"),
+                "n_hours": 0,
+            }
+
+        surplus = pd.to_numeric(df_scenario_base.get("surplus_mw"), errors="coerce").fillna(0.0)
+        surplus_unabs = pd.to_numeric(df_scenario_base.get("surplus_unabsorbed_mw"), errors="coerce").fillna(0.0)
+        sink_non_bess = pd.to_numeric(df_scenario_base.get("sink_non_bess_mw"), errors="coerce").fillna(0.0)
+        bess_charge = pd.to_numeric(df_scenario_base.get("bess_charge_mw"), errors="coerce").fillna(0.0)
+        regime = df_scenario_base.get("regime", pd.Series("C", index=df_scenario_base.index))
+        absorbed = float(np.minimum(surplus.values, (sink_non_bess + bess_charge).values).sum())
+        surplus_total = float(surplus.sum())
+        far = float("nan") if surplus_total <= 0.0 else float(absorbed / surplus_total)
+
+        return {
+            "total_surplus_twh": surplus_total * 1e-6,
+            "total_surplus_unabs_twh": float(surplus_unabs.sum()) * 1e-6,
+            "sink_non_bess_mean_mw": float(sink_non_bess.mean()),
+            "bess_charge_twh": float(bess_charge.sum()) * 1e-6,
+            "h_regime_a": int((regime == "A").sum()),
+            "far": far,
+            "n_hours": int(len(df_scenario_base)),
+        }
+
+    def find_q4_stress_reference(
+        df_base_processed: pd.DataFrame,
+        country_key: str,
+        year: int,
+        country_cfg: dict,
+        thresholds: dict,
+        commodities: dict,
+        max_delta_pv_gw: float = 40,
+        step_gw: float = 2,
+        base_overrides: dict | None = None,
+    ) -> dict:
+        tested_rows: list[dict] = []
+        overrides = dict(base_overrides or {})
+        selected_df = None
+        selected_metrics = None
+        selected_delta = None
+
+        for delta in np.arange(0.0, max(0.0, float(max_delta_pv_gw)) + 1e-9, max(0.5, float(step_gw))):
+            params = dict(overrides)
+            params["delta_pv_gw"] = float(params.get("delta_pv_gw", 0.0)) + float(delta)
+            df_s = apply_scenario(
+                df_base_processed=df_base_processed,
+                country_key=country_key,
+                year=year,
+                country_cfg=country_cfg,
+                thresholds=thresholds,
+                commodities=commodities,
+                scenario_params=params,
+                price_mode="synthetic",
+            )
+            m = compute_annual_metrics(df_s, country_key, year, country_cfg)
+            tested_rows.append(
+                {
+                    "delta_pv_gw": float(delta),
+                    "far": float(m.get("far", np.nan)),
+                    "h_regime_a": float(m.get("h_regime_a", np.nan)),
+                    "sr": float(m.get("sr", np.nan)),
+                    "total_surplus_twh": float(m.get("total_surplus_twh", np.nan)),
+                    "total_surplus_unabs_twh": float(m.get("total_surplus_unabs_twh", np.nan)),
+                }
+            )
+            far = float(m.get("far", np.nan))
+            h_a = float(m.get("h_regime_a", np.nan))
+            if (np.isfinite(h_a) and h_a > 0.0) or (np.isfinite(far) and far < 0.995):
+                selected_df = df_s
+                selected_metrics = m
+                selected_delta = float(delta)
+                break
+
+        tested_df = pd.DataFrame(tested_rows)
+        if selected_df is None:
+            return {
+                "found": False,
+                "delta_pv_gw": float("nan"),
+                "df_reference": None,
+                "metrics": None,
+                "diagnostics": None,
+                "tested_grid": tested_df,
+            }
+
+        return {
+            "found": True,
+            "delta_pv_gw": selected_delta,
+            "df_reference": selected_df,
+            "metrics": selected_metrics,
+            "diagnostics": compute_q4_plateau_diagnostics(selected_df),
+            "tested_grid": tested_df,
+        }
+
+    def compute_q4_bess_sweep(
+        df_base_processed: pd.DataFrame,
+        country_key: str,
+        year: int,
+        country_cfg: dict,
+        thresholds: dict,
+        commodities: dict,
+        sweep_gw: list[float],
+        reference_overrides: dict | None,
+    ) -> pd.DataFrame:
+        rows = []
+        base_overrides = dict(reference_overrides or {})
+        for gw in sweep_gw:
+            params = dict(base_overrides)
+            delta = float(gw)
+            params["delta_bess_power_gw"] = delta
+            params["delta_bess_energy_gwh"] = float(params.get("delta_bess_energy_gwh", delta * 4.0))
+            df_s = apply_scenario(
+                df_base_processed=df_base_processed,
+                country_key=country_key,
+                year=year,
+                country_cfg=country_cfg,
+                thresholds=thresholds,
+                commodities=commodities,
+                scenario_params=params,
+                price_mode="synthetic",
+            )
+            m = compute_annual_metrics(df_s, country_key, year, country_cfg)
+            rows.append(
+                {
+                    "delta_bess_power_gw": delta,
+                    "delta_bess_energy_gwh": float(params["delta_bess_energy_gwh"]),
+                    "far": float(m.get("far", np.nan)),
+                    "h_regime_a": float(m.get("h_regime_a", np.nan)),
+                    "sr": float(m.get("sr", np.nan)),
+                    "ttl": float(m.get("ttl", np.nan)),
+                    "capture_ratio_pv": float(m.get("capture_ratio_pv", np.nan)),
+                    "total_surplus_twh": float(m.get("total_surplus_twh", np.nan)),
+                    "total_surplus_unabs_twh": float(m.get("total_surplus_unabs_twh", np.nan)),
+                    "bess_charge_twh": float(m.get("bess_charge_twh", np.nan)),
+                    "bess_discharge_twh": float(m.get("bess_discharge_twh", np.nan)),
+                }
+            )
+        return pd.DataFrame(rows).sort_values("delta_bess_power_gw").reset_index(drop=True)
 from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     challenge_block,
