@@ -52,7 +52,13 @@ def _score_stage_2(m: dict, t: dict, rules: list[str]) -> int:
     return score
 
 
-def _score_stage_3(m: dict, t: dict, rules: list[str], blocked_rules: list[str]) -> int:
+def _score_stage_3(
+    m: dict,
+    t: dict,
+    stage2_t: dict,
+    rules: list[str],
+    blocked_rules: list[str],
+) -> int:
     far = m.get("far")
     if not _is_finite(far):
         return 0
@@ -61,6 +67,21 @@ def _score_stage_3(m: dict, t: dict, rules: list[str], blocked_rules: list[str])
     if require_declining and m.get("h_negative_declining") is not True:
         blocked_rules.append("stage_3:require_h_neg_declining")
         return 0
+
+    # Guardrail: stage_3 should represent a transition from stage_2 dynamics.
+    # We require a recent peak of negative hours at/above the stage_2 threshold.
+    stage2_hneg_min = stage2_t.get("h_negative_min")
+    if _is_finite(stage2_hneg_min):
+        recent_peak = m.get("h_negative_recent_peak_3y")
+        current_hneg = m.get("h_negative_obs")
+        has_stage2_history = False
+        if _is_finite(recent_peak):
+            has_stage2_history = float(recent_peak) >= float(stage2_hneg_min)
+        elif _is_finite(current_hneg):
+            has_stage2_history = float(current_hneg) >= float(stage2_hneg_min)
+        if not has_stage2_history:
+            blocked_rules.append("stage_3:require_stage2_history")
+            return 0
 
     score = 0
     if far >= t["far_min"]:
@@ -137,7 +158,7 @@ def diagnose_phase(metrics: dict, thresholds: dict) -> dict:
 
     s1 = _score_stage_1(metrics, phase_cfg["stage_1"], rules_1)
     s2 = _score_stage_2(metrics, phase_cfg["stage_2"], rules_2)
-    s3 = _score_stage_3(metrics, phase_cfg["stage_3"], rules_3, blocked_rules)
+    s3 = _score_stage_3(metrics, phase_cfg["stage_3"], phase_cfg["stage_2"], rules_3, blocked_rules)
     s4 = _score_stage_4(metrics, phase_cfg["stage_4"], rules_4)
 
     far = metrics.get("far")

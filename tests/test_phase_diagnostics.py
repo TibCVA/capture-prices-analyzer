@@ -47,6 +47,7 @@ def test_stage_3_blocked_when_h_negative_not_declining(thresholds_cfg):
         "days_spread_above_50_obs": 160,
         "h_regime_c": 1200,
         "h_negative_declining": False,
+        "h_negative_recent_peak_3y": 260,
     }
     d = diagnose_phase(metrics, thresholds_cfg)
     assert "stage_3:require_h_neg_declining" in d.get("blocked_rules", [])
@@ -64,10 +65,29 @@ def test_stage_3_possible_when_h_negative_declining(thresholds_cfg):
         "days_spread_above_50_obs": 120,
         "h_regime_c": 1800,
         "h_negative_declining": True,
+        "h_negative_recent_peak_3y": 260,
     }
     d = diagnose_phase(metrics, thresholds_cfg)
     assert "stage_3:require_h_neg_declining" not in d.get("blocked_rules", [])
     assert d["phase"] in {"stage_3", "unknown", "stage_2"}
+
+
+def test_stage_3_blocked_without_stage2_history(thresholds_cfg):
+    metrics = {
+        "h_negative_obs": 80,
+        "h_below_5_obs": 120,
+        "capture_ratio_pv": 0.88,
+        "sr": 0.01,
+        "far": 0.95,
+        "ir": 0.20,
+        "days_spread_above_50_obs": 20,
+        "h_regime_c": 2000,
+        "h_negative_declining": True,
+        "h_negative_recent_peak_3y": 120,
+    }
+    d = diagnose_phase(metrics, thresholds_cfg)
+    assert "stage_3:require_stage2_history" in d.get("blocked_rules", [])
+    assert d["phase"] != "stage_3"
 
 
 def test_phase_unknown_low_confidence(thresholds_cfg):

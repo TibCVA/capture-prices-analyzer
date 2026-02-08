@@ -199,6 +199,8 @@ def _build_baseline_records(
     hneg_ctx = compute_h_negative_declining_flags(df[["country", "year", "h_negative_obs"]])
     df = df.merge(hneg_ctx, on=["country", "year"], how="left")
     df["h_negative_declining"] = df["h_negative_declining"].fillna(False).astype(bool)
+    if "h_negative_recent_peak_3y" not in df.columns:
+        df["h_negative_recent_peak_3y"] = np.nan
 
     phases: list[str] = []
     confidences: list[float] = []

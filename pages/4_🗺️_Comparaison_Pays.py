@@ -66,7 +66,7 @@ def _recompute_phase_context(df_hist: pd.DataFrame, thresholds: dict) -> pd.Data
     if not required.issubset(set(out.columns)):
         return out
 
-    out = out.drop(columns=["h_negative_declining"], errors="ignore")
+    out = out.drop(columns=["h_negative_declining", "h_negative_recent_peak_3y"], errors="ignore")
     ctx = compute_h_negative_declining_flags(out[["country", "year", "h_negative_obs"]])
     out = out.merge(ctx, on=["country", "year"], how="left")
     out["h_negative_declining"] = out["h_negative_declining"].astype("boolean").fillna(False).astype(bool)

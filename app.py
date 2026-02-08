@@ -280,7 +280,10 @@ def _refresh_phase_context(s: dict) -> None:
         return
 
     flags_map = {
-        (str(r["country"]), int(r["year"])): bool(r["h_negative_declining"])
+        (str(r["country"]), int(r["year"])): {
+            "h_negative_declining": bool(r.get("h_negative_declining", False)),
+            "h_negative_recent_peak_3y": r.get("h_negative_recent_peak_3y"),
+        }
         for _, r in flags.iterrows()
     }
 
@@ -291,8 +294,9 @@ def _refresh_phase_context(s: dict) -> None:
         country, year, mode = key[0], key[1], key[2]
         if mode != s.get("price_mode"):
             continue
-        flag = flags_map.get((str(country), int(year)), False)
-        metrics["h_negative_declining"] = bool(flag)
+        ctx = flags_map.get((str(country), int(year)), {})
+        metrics["h_negative_declining"] = bool(ctx.get("h_negative_declining", False))
+        metrics["h_negative_recent_peak_3y"] = ctx.get("h_negative_recent_peak_3y")
         diag = diagnose_phase(metrics, s["thresholds"])
         s["diagnostics"][(country, year)] = diag
 
