@@ -32,6 +32,7 @@ from src.constants import (
     COL_SURPLUS_UNABS,
     COL_TCA,
     COL_VRE,
+    COL_WIND_OFF,
     COL_WIND_ON,
     OPTIONAL_COLUMNS,
 )
@@ -46,6 +47,7 @@ _DIAGNOSTICS_DIR = Path("data/diagnostics")
 _EXTERNAL_DIR = Path("data/external")
 
 _LEGACY_WARNING_EMITTED = False
+_SEMANTIC_TOL = 1e-6
 
 
 def _ensure_dir(path: Path) -> None:
@@ -75,6 +77,49 @@ def load_raw(country_key: str, year: int) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Raw cache introuvable: {path}")
     return pd.read_parquet(path)
+
+
+def ensure_raw_minimum_columns(df: pd.DataFrame, country_key: str, year: int) -> pd.DataFrame:
+    """Ensure mandatory raw columns before compute_nrl and track imputations.
+
+    Rules:
+    - load_mw absent => raise
+    - solar_mw absent => create 0.0 and flag
+    - wind_onshore_mw absent => create 0.0 and flag
+    - price_da_eur_mwh absent => create NaN and flag
+    """
+
+    out = df.copy()
+    flags = list(out.attrs.get("data_quality_flags", []))
+
+    if COL_LOAD not in out.columns:
+        raise ValueError(f"Raw invalide {country_key}/{year}: colonne obligatoire absente ({COL_LOAD})")
+
+    if COL_SOLAR not in out.columns:
+        out[COL_SOLAR] = 0.0
+        msg = f"{country_key}/{year}: {COL_SOLAR} absente -> imputee a 0.0"
+        flags.append(msg)
+        logger.warning(msg)
+
+    if COL_WIND_ON not in out.columns:
+        out[COL_WIND_ON] = 0.0
+        msg = f"{country_key}/{year}: {COL_WIND_ON} absente -> imputee a 0.0"
+        flags.append(msg)
+        logger.warning(msg)
+
+    if COL_PRICE_DA not in out.columns:
+        out[COL_PRICE_DA] = np.nan
+        msg = f"{country_key}/{year}: {COL_PRICE_DA} absente -> creee en NaN"
+        flags.append(msg)
+        logger.warning(msg)
+
+    # Optional harmonization for robust downstream behavior
+    if COL_WIND_OFF not in out.columns:
+        out[COL_WIND_OFF] = 0.0
+
+    if flags:
+        out.attrs["data_quality_flags"] = flags
+    return out
 
 
 def import_csv_to_raw(filepath: str, country_key: str, year: int) -> pd.DataFrame:
@@ -184,6 +229,71 @@ def _legacy_candidates(country_key: str, year: int) -> list[Path]:
     return sorted(candidates)
 
 
+def validate_processed_semantics(df: pd.DataFrame) -> tuple[bool, list[str]]:
+    """Validate core semantic identities and regime logic for processed caches."""
+
+    reasons: list[str] = []
+
+    required = {
+        COL_SURPLUS,
+        COL_FLEX_EFFECTIVE,
+        COL_SURPLUS_UNABS,
+        COL_SINK_NON_BESS,
+        COL_BESS_CHARGE,
+        COL_NRL,
+        COL_REGIME,
+    }
+    missing = sorted([c for c in required if c not in df.columns])
+    if missing:
+        reasons.append(f"colonnes manquantes: {missing}")
+        return False, reasons
+
+    s = pd.to_numeric(df[COL_SURPLUS], errors="coerce").fillna(0.0)
+    fe = pd.to_numeric(df[COL_FLEX_EFFECTIVE], errors="coerce").fillna(0.0)
+    su = pd.to_numeric(df[COL_SURPLUS_UNABS], errors="coerce").fillna(0.0)
+    sink = pd.to_numeric(df[COL_SINK_NON_BESS], errors="coerce").fillna(0.0)
+    bc = pd.to_numeric(df[COL_BESS_CHARGE], errors="coerce").fillna(0.0)
+    nrl = pd.to_numeric(df[COL_NRL], errors="coerce").fillna(0.0)
+    regime = df[COL_REGIME].astype(str)
+
+    # Identity 1: flex_effective = sink_non_bess + bess_charge
+    err_flex = (fe - (sink + bc)).abs()
+    n_bad_flex = int((err_flex > _SEMANTIC_TOL).sum())
+    if n_bad_flex > 0:
+        reasons.append(f"flex_effective incoherent sur {n_bad_flex} lignes")
+
+    # Identity 2: surplus_unabsorbed = clip(surplus - flex_effective, lower=0)
+    expected_su = (s - fe).clip(lower=0.0)
+    err_su = (su - expected_su).abs()
+    n_bad_su = int((err_su > _SEMANTIC_TOL).sum())
+    if n_bad_su > 0:
+        reasons.append(f"surplus_unabsorbed incoherent sur {n_bad_su} lignes")
+
+    # Regime logic checks
+    n_bad_a = int(((regime == "A") & ~(su > _SEMANTIC_TOL)).sum())
+    if n_bad_a > 0:
+        reasons.append(f"regime A invalide sur {n_bad_a} lignes")
+
+    n_bad_b = int(
+        (
+            (regime == "B")
+            & ~((s > _SEMANTIC_TOL) & (su <= _SEMANTIC_TOL))
+        ).sum()
+    )
+    if n_bad_b > 0:
+        reasons.append(f"regime B invalide sur {n_bad_b} lignes")
+
+    n_bad_c = int(((regime == "C") & (nrl < -_SEMANTIC_TOL)).sum())
+    if n_bad_c > 0:
+        reasons.append(f"regime C invalide sur {n_bad_c} lignes")
+
+    n_bad_d = int(((regime == "D") & (nrl <= _SEMANTIC_TOL)).sum())
+    if n_bad_d > 0:
+        reasons.append(f"regime D invalide sur {n_bad_d} lignes")
+
+    return len(reasons) == 0, reasons
+
+
 def _migrate_legacy_df(df: pd.DataFrame, price_mode: str) -> pd.DataFrame:
     """Mappe les anciennes conventions de colonnes/valeurs vers v3."""
 
@@ -209,14 +319,19 @@ def _migrate_legacy_df(df: pd.DataFrame, price_mode: str) -> pd.DataFrame:
     if COL_BESS_SOC not in out.columns:
         out[COL_BESS_SOC] = 0.0
 
-    if COL_FLEX_EFFECTIVE not in out.columns:
-        out[COL_FLEX_EFFECTIVE] = out[COL_SINK_NON_BESS] + out[COL_BESS_CHARGE]
+    # Recompute systematically from physical columns to avoid carrying legacy inconsistencies.
+    out[COL_FLEX_EFFECTIVE] = (
+        pd.to_numeric(out.get(COL_SINK_NON_BESS, 0.0), errors="coerce").fillna(0.0)
+        + pd.to_numeric(out.get(COL_BESS_CHARGE, 0.0), errors="coerce").fillna(0.0)
+    )
 
-    if COL_SURPLUS_UNABS not in out.columns:
-        if COL_SURPLUS in out.columns:
-            out[COL_SURPLUS_UNABS] = (out[COL_SURPLUS] - out[COL_FLEX_EFFECTIVE]).clip(lower=0.0)
-        else:
-            out[COL_SURPLUS_UNABS] = 0.0
+    if COL_SURPLUS in out.columns:
+        out[COL_SURPLUS_UNABS] = (
+            pd.to_numeric(out[COL_SURPLUS], errors="coerce").fillna(0.0)
+            - pd.to_numeric(out[COL_FLEX_EFFECTIVE], errors="coerce").fillna(0.0)
+        ).clip(lower=0.0)
+    else:
+        out[COL_SURPLUS_UNABS] = 0.0
 
     if COL_PRICE_SYNTH not in out.columns:
         out[COL_PRICE_SYNTH] = np.nan
@@ -246,6 +361,7 @@ def load_processed(
     must_run_mode: str,
     flex_model_mode: str,
     price_mode: str,
+    validate_semantics: bool = True,
 ) -> pd.DataFrame | None:
     """Charge le cache process v3, avec migration progressive du legacy."""
 
@@ -253,7 +369,17 @@ def load_processed(
 
     new_path = processed_cache_path(country_key, year, must_run_mode, flex_model_mode, price_mode)
     if new_path.exists():
-        return pd.read_parquet(new_path)
+        out = pd.read_parquet(new_path)
+        if validate_semantics:
+            ok, reasons = validate_processed_semantics(out)
+            if not ok:
+                logger.warning(
+                    "Cache process invalide ignore (%s): %s",
+                    new_path.name,
+                    "; ".join(reasons),
+                )
+                return None
+        return out
 
     legacy = _legacy_candidates(country_key, year)
     if not legacy:
@@ -268,6 +394,15 @@ def load_processed(
     old_path = legacy[0]
     df = pd.read_parquet(old_path)
     migrated = _migrate_legacy_df(df, price_mode=price_mode)
+    if validate_semantics:
+        ok, reasons = validate_processed_semantics(migrated)
+        if not ok:
+            logger.warning(
+                "Legacy migre invalide ignore (%s): %s",
+                old_path.name,
+                "; ".join(reasons),
+            )
+            return None
     save_processed(migrated, country_key, year, must_run_mode, flex_model_mode, price_mode)
     return migrated
 

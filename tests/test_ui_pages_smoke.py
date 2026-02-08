@@ -188,3 +188,14 @@ def test_app_and_pages_smoke() -> None:
         at.session_state["state"] = state
         at.run(timeout=30)
         assert not at.exception, f"Unexpected exception in {file}: {at.exception}"
+
+
+def test_excesum_static_page_shows_quality_sections() -> None:
+    page = Path("pages/9_🧾_ExceSum_des_conclusions.py")
+    at = AppTest.from_file(str(page))
+    at.run(timeout=30)
+    assert not at.exception, f"Unexpected exception in {page}: {at.exception}"
+
+    markdown_values = [getattr(x, "value", "") for x in at.markdown]
+    all_text = "\n".join(str(v) for v in markdown_values)
+    assert "Controle qualite" in all_text

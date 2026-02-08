@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +11,15 @@ import pandas as pd
 from src.commentary_consistency import validate_claims_against_baseline
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
 from src.constants import OUTLIER_YEARS
-from src.data_loader import load_commodity_prices, load_metrics, load_processed, load_raw
+from src.data_loader import (
+    ensure_raw_minimum_columns,
+    load_commodity_prices,
+    load_metrics,
+    load_processed,
+    load_raw,
+    save_processed,
+    validate_processed_semantics,
+)
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
 from src.objectives_loader import load_objectives_docx
@@ -37,6 +45,7 @@ class BaselineRunConfig:
     flex_model_mode: str = "observed"
     price_mode: str = "observed"
     exclude_outlier_years: tuple[int, ...] = (2022,)
+    force_recompute: bool = False
 
 
 def _safe_float(value) -> float:
@@ -56,13 +65,54 @@ def _load_or_compute_processed(
     must_run_mode: str,
     flex_model_mode: str,
     price_mode: str,
-) -> pd.DataFrame:
-    df = load_processed(country, year, must_run_mode, flex_model_mode, price_mode)
-    if df is not None:
-        return df
+    force_recompute: bool = False,
+) -> tuple[pd.DataFrame, dict]:
+    cache_semantic_status = "not_found"
+    cache_semantic_reasons: list[str] = []
+    raw_quality_flags: list[str] = []
+
+    # Check cache with explicit semantic validation for observability
+    if not force_recompute:
+        cached_any = load_processed(
+            country,
+            year,
+            must_run_mode,
+            flex_model_mode,
+            price_mode,
+            validate_semantics=False,
+        )
+        if cached_any is not None:
+            ok, reasons = validate_processed_semantics(cached_any)
+            if ok:
+                cache_semantic_status = "valid"
+                return cached_any, {
+                    "cache_semantic_status": cache_semantic_status,
+                    "cache_semantic_reasons": cache_semantic_reasons,
+                    "raw_quality_flags": raw_quality_flags,
+                    "source": "cache",
+                }
+            cache_semantic_status = "invalid"
+            cache_semantic_reasons = reasons
+    else:
+        cached_any = load_processed(
+            country,
+            year,
+            must_run_mode,
+            flex_model_mode,
+            price_mode,
+            validate_semantics=False,
+        )
+        if cached_any is None:
+            cache_semantic_status = "not_found"
+        else:
+            ok, reasons = validate_processed_semantics(cached_any)
+            cache_semantic_status = "valid" if ok else "invalid"
+            cache_semantic_reasons = [] if ok else reasons
 
     raw = load_raw(country, year)
-    return compute_nrl(
+    raw = ensure_raw_minimum_columns(raw, country, year)
+    raw_quality_flags = list(raw.attrs.get("data_quality_flags", []))
+    df_proc = compute_nrl(
         df_raw=raw,
         country_key=country,
         year=year,
@@ -74,6 +124,13 @@ def _load_or_compute_processed(
         scenario_overrides=None,
         price_mode=price_mode,
     )
+    save_processed(df_proc, country, year, must_run_mode, flex_model_mode, price_mode)
+    return df_proc, {
+        "cache_semantic_status": cache_semantic_status,
+        "cache_semantic_reasons": cache_semantic_reasons,
+        "raw_quality_flags": raw_quality_flags,
+        "source": "recompute",
+    }
 
 
 def _build_baseline_records(
@@ -81,10 +138,11 @@ def _build_baseline_records(
     countries_cfg: dict,
     thresholds: dict,
     commodities: dict,
-) -> tuple[pd.DataFrame, dict[tuple[str, int], pd.DataFrame], list[str]]:
+) -> tuple[pd.DataFrame, dict[tuple[str, int], pd.DataFrame], list[str], pd.DataFrame]:
     rows: list[dict] = []
     processed: dict[tuple[str, int], pd.DataFrame] = {}
     issues: list[str] = []
+    quality_rows: list[dict] = []
 
     for country in cfg.countries:
         if country not in countries_cfg:
@@ -93,7 +151,7 @@ def _build_baseline_records(
 
         for year in cfg.years:
             try:
-                df_proc = _load_or_compute_processed(
+                df_proc, load_meta = _load_or_compute_processed(
                     country=country,
                     year=year,
                     countries_cfg=countries_cfg,
@@ -102,6 +160,7 @@ def _build_baseline_records(
                     must_run_mode=cfg.must_run_mode,
                     flex_model_mode=cfg.flex_model_mode,
                     price_mode=cfg.price_mode,
+                    force_recompute=bool(getattr(cfg, "force_recompute", False)),
                 )
                 processed[(country, year)] = df_proc
 
@@ -112,16 +171,36 @@ def _build_baseline_records(
                 record["phase_confidence"] = diag.get("confidence", np.nan)
                 record["phase_score"] = diag.get("score", np.nan)
                 rows.append(record)
+
+                raw_flags = load_meta.get("raw_quality_flags", [])
+                quality_rows.append(
+                    {
+                        "country": country,
+                        "year": year,
+                        "cache_semantic_status": load_meta.get("cache_semantic_status", "unknown"),
+                        "cache_semantic_reasons": "; ".join(load_meta.get("cache_semantic_reasons", [])),
+                        "raw_imputation_flags": "; ".join(raw_flags),
+                        "raw_imputation_count": len(raw_flags),
+                        "price_completeness": _safe_float(
+                            pd.to_numeric(df_proc.get("price_da_eur_mwh"), errors="coerce").notna().mean()
+                            if "price_da_eur_mwh" in df_proc.columns
+                            else np.nan
+                        ),
+                        "data_completeness": _safe_float(metrics.get("data_completeness")),
+                        "source": load_meta.get("source", "unknown"),
+                    }
+                )
             except FileNotFoundError:
                 issues.append(f"Donnees absentes: {country} {year}")
             except Exception as exc:
                 issues.append(f"Echec {country} {year}: {exc}")
 
     if not rows:
-        return pd.DataFrame(), processed, issues
+        return pd.DataFrame(), processed, issues, pd.DataFrame()
 
     df = pd.DataFrame(rows).sort_values(["country", "year"]).reset_index(drop=True)
-    return df, processed, issues
+    qdf = pd.DataFrame(quality_rows).sort_values(["country", "year"]).reset_index(drop=True)
+    return df, processed, issues, qdf
 
 
 def _q1_threshold_table(metrics_df: pd.DataFrame, thresholds: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -509,6 +588,7 @@ def write_excesum_docs(results: dict, docs_dir: str = "docs") -> tuple[str, str]
     verification_path = root / "EXCESUM_VERIFICATION_MATRIX.md"
 
     metrics = results.get("metrics_df", pd.DataFrame())
+    quality_df = results.get("data_quality_flags", pd.DataFrame())
     countries = ", ".join(sorted(metrics["country"].dropna().unique())) if not metrics.empty else "n/a"
     years = f"{int(metrics['year'].min())}-{int(metrics['year'].max())}" if not metrics.empty else "n/a"
 
@@ -522,7 +602,27 @@ def write_excesum_docs(results: dict, docs_dir: str = "docs") -> tuple[str, str]
         "## Q1..Q6",
         "",
         "Les tableaux de preuve sont produits dans la page ExceSum et dans les objets de sortie du moteur.",
+        "",
+        "## Qualite donnees / imputations / completudes",
     ]
+    if isinstance(quality_df, pd.DataFrame) and not quality_df.empty:
+        bad_price = quality_df[quality_df["price_completeness"] < 0.90]
+        imputations = quality_df[quality_df["raw_imputation_count"] > 0]
+        lines.extend(
+            [
+                f"- Couples avec price_completeness < 90%: {len(bad_price)}",
+                f"- Couples avec imputations de colonnes raw: {len(imputations)}",
+                f"- Couples caches invalides detectes: {int((quality_df['cache_semantic_status'] == 'invalid').sum())}",
+            ]
+        )
+        if not bad_price.empty:
+            lines.append("- Paires prix incomplets (extrait):")
+            for _, row in bad_price.head(10).iterrows():
+                lines.append(
+                    f"  - {row['country']} {int(row['year'])}: price_completeness={float(row['price_completeness']):.3f}"
+                )
+    else:
+        lines.append("- Donnees de qualite non disponibles.")
     conclusions_path.write_text("\n".join(lines), encoding="utf-8")
 
     verif_rows = results.get("verification_rows", [])
@@ -537,20 +637,25 @@ def write_excesum_docs(results: dict, docs_dir: str = "docs") -> tuple[str, str]
 def run_excesum_baseline(
     objectives_docx_path: str | None = None,
     run_cfg: BaselineRunConfig | None = None,
+    force_recompute: bool = False,
 ) -> dict:
-    cfg = run_cfg or BaselineRunConfig()
+    if run_cfg is None:
+        cfg = BaselineRunConfig(force_recompute=force_recompute)
+    else:
+        cfg = replace(run_cfg, force_recompute=bool(run_cfg.force_recompute or force_recompute))
     countries_cfg = load_countries_config()
     thresholds = load_thresholds()
     scenarios = load_scenarios()
     commodities = load_commodity_prices()
 
-    metrics_df, processed, issues = _build_baseline_records(cfg, countries_cfg, thresholds, commodities)
+    metrics_df, processed, issues, quality_df = _build_baseline_records(cfg, countries_cfg, thresholds, commodities)
 
     if metrics_df.empty:
         return {
             "config": cfg,
             "metrics_df": pd.DataFrame(),
             "issues": issues or ["Aucune donnee baseline disponible."],
+            "data_quality_flags": pd.DataFrame(),
         }
 
     q1_detail, q1_country = _q1_threshold_table(metrics_df, thresholds)
@@ -587,6 +692,17 @@ def run_excesum_baseline(
     ver_narrative, consistency_report = _verification_narrative()
     verification_rows = [ver_data, ver_calc, ver_narrative]
 
+    rebuild_matrix = {
+        "pairs_total": int(len(metrics_df)),
+        "cache_semantic_invalid_pairs": int((quality_df.get("cache_semantic_status") == "invalid").sum())
+        if not quality_df.empty
+        else 0,
+        "pairs_recomputed": int((quality_df.get("source") == "recompute").sum()) if not quality_df.empty else 0,
+        "pairs_h_regime_a_gt_0": int((metrics_df["h_regime_a"] > 0).sum()),
+        "pairs_h_regime_a_eq_0": int((metrics_df["h_regime_a"] == 0).sum()),
+        "phase_distribution": metrics_df["phase"].value_counts(dropna=False).to_dict(),
+    }
+
     objectives = None
     if objectives_docx_path:
         try:
@@ -616,6 +732,8 @@ def run_excesum_baseline(
         "country_conclusions": country_conclusions,
         "consistency_report": consistency_report,
         "verification_rows": verification_rows,
+        "data_quality_flags": quality_df,
+        "rebuild_matrix": rebuild_matrix,
     }
 
 

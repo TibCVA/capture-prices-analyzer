@@ -12,6 +12,7 @@ from src.commentary_bridge import comment_kpi, so_what_block
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
 from src.data_fetcher import fetch_country_year
 from src.data_loader import (
+    ensure_raw_minimum_columns,
     list_processed_keys,
     load_commodity_prices,
     load_metrics,
@@ -132,6 +133,7 @@ def _load_one(country: str, year: int, s: dict):
             df_raw = load_raw(country, year)
         except FileNotFoundError:
             df_raw = fetch_country_year(country, year, countries_cfg=countries_cfg, force=False)
+        df_raw = ensure_raw_minimum_columns(df_raw, country, year)
 
         df_proc = compute_nrl(
             df_raw=df_raw,
@@ -151,6 +153,7 @@ def _load_one(country: str, year: int, s: dict):
     else:
         try:
             df_raw = load_raw(country, year)
+            df_raw = ensure_raw_minimum_columns(df_raw, country, year)
         except FileNotFoundError:
             df_raw = None
 
