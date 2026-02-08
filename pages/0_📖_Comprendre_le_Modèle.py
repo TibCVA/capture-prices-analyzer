@@ -232,12 +232,24 @@ render_commentary(
 )
 
 if country == "FR":
-    dynamic_text = (
-        "Lecture FR: un surplus non absorbe eleve signifie qu'apres absorption par les sinks modelises "
-        "(exports/PSH/BESS), il reste un reliquat a gerer par d'autres mecanismes non explicites du modele "
-        "(notamment curtailment et ajustements operationnels)."
+    render_commentary(
+        "<strong>Lecture specifique France : surplus d'origine nucleaire</strong><br>"
+        "Le surplus non absorbe francais est principalement d'origine <strong>nucleaire</strong>, "
+        "pas VRE. Le modele classe toute la production nucleaire observee comme must-run "
+        "(IR &gt; 1.0 en 2024 : le must-run seul depasse la demande minimale). "
+        "Ce surplus existait deja en 2015 (4043 h en regime A) avec seulement 5% de VRE.<br><br>"
+        "<strong>Pourquoi la coherence regime/prix est faible pour FR (~28%)</strong> : "
+        "le modele ne compte que PSH + exports + BESS comme flexibilite. "
+        "Il ne modelise pas l'hydro barrage (~10 GW dispatchable en France), "
+        "le DSM industriel ni les ajustements operationnels nucleaires reels. "
+        "En consequence, le modele detecte 4437 h de regime A en 2024, "
+        "mais seules ~350 h affichent des prix negatifs sur le marche.<br><br>"
+        "<em>Consequence pour l'analyse</em> : les metriques FR (SR, FAR, h_regime_a) "
+        "mesurent correctement le stress <strong>dans le perimetre modelise</strong> "
+        "(PSH + exports + BESS), mais surestiment le stress reel du marche. "
+        "Toujours croiser avec h_negative_obs et regime_coherence pour calibrer l'interpretation.",
+        variant="warning",
     )
-    narrative(dynamic_text)
 
 section_header("Visualisation 48h", "Load, VRE, Must-run, NRL, surplus et flex")
 df48 = df.head(48).copy()
@@ -583,6 +595,8 @@ with st.expander("Etape 8 - Limites et bon usage", expanded=True):
 - Le dispatch BESS est deterministe (pas d'optimisation economique complete).
 - Les conclusions fortes exigent un `n` suffisant, une qualite de donnees correcte et une coherence regime/prix acceptable.
 - Si les indicateurs sont plats, il faut verifier la physique de base avant d'inferer un "effet nul".
+- **Must-run = production observee** : le modele traite toute la production nucleaire/charbon/biomasse/hydro RoR comme inflexible. Pour la France (IR > 1), cela surestime le surplus car le nucleaire est en realite partiellement modulable. La coherence regime/prix pour FR (~28%) reflete cette limitation. Pour les pays sans gros must-run nucleaire (DE, DK, PL), le modele est bien calibre (coherence > 90%).
+- **Flex modelisee limitee** : le modele ne compte que PSH + exports + BESS. L'hydro barrage, le DSM et les ajustements thermiques ne sont pas modelises comme absorption de surplus.
 """
     )
     st.caption(

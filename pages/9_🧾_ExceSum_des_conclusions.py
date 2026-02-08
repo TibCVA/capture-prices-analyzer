@@ -419,6 +419,23 @@ with tabs[4]:
 
             st.markdown(f"**{c}** : {interpretation}")
 
+        dynamic_narrative(
+            "<strong>Pourquoi la France concentre l'essentiel du surplus non absorbe</strong><br>"
+            "Le surplus francais est d'origine <strong>nucleaire</strong>, pas VRE. "
+            "L'IR (Inflexibility Ratio) de la France depasse 1.0 : le must-run nucleaire seul "
+            "excede la demande minimale (P10). Ce surplus existait deja en 2015 "
+            "(4043 h en regime A, 5% de VRE seulement) et a chute a 378 h en 2022 "
+            "(crise corrosion nucleaire, IR = 0.71), confirmant que c'est le nucleaire "
+            "— pas les VRE — qui en est le moteur.<br><br>"
+            "Le modele ne compte que PSH + exports + BESS comme flex. "
+            "L'hydro barrage (~10 GW) et le DSM ne sont pas modelises. "
+            "En consequence, les 4437 h de regime A et 12.47 TWh de surplus non absorbe "
+            "surestiment le stress reel : seules ~350 h affichent des prix negatifs sur le marche "
+            "(coherence regime/prix = 28%). "
+            "Pour DE/DK/ES/PL, le modele est bien calibre (coherence > 90%).",
+            severity="warning",
+        )
+
         challenge_block(
             "Plateau BESS = resultat physiquement normal",
             "Dans le sweep baseline, le FAR reste a 1.0 et h_regime_a a 0 "
@@ -607,6 +624,17 @@ with tabs[7]:
 
 **Q6** : {row.get('q6_status', 'n/a').replace('_', ' ')}.
 """)
+                if c == "FR":
+                    dynamic_narrative(
+                        "<strong>Note methodologique FR</strong> : le surplus non absorbe eleve "
+                        "(12.47 TWh, 4437 h en regime A) est d'origine nucleaire (IR = 1.06), "
+                        "pas VRE (13.4%). Ce phenomene existait en 2015 (4043 h, 5% de VRE) "
+                        "et a chute en 2022 (378 h, crise corrosion). Le modele surestime "
+                        "le stress reel car la flex modelisee (PSH + exports + BESS) exclut "
+                        "l'hydro barrage et le DSM. Coherence regime/prix = 28% "
+                        "(vs > 90% pour DE/DK).",
+                        severity="warning",
+                    )
 
 
 # ===== TAB 8 : ANNEXES =====
