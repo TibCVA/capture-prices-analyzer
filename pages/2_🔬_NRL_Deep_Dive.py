@@ -98,9 +98,10 @@ fig1.add_trace(go.Scatter(x=df.index, y=df[COL_SURPLUS], name="Surplus", line=di
 fig1.add_trace(
     go.Scatter(x=df.index, y=df[COL_FLEX_EFFECTIVE], name="Flex effective", line=dict(color="#2563eb", width=1.3))
 )
-fig1.update_layout(height=440, xaxis_title="Heure", yaxis_title="MW", **PLOTLY_LAYOUT_DEFAULTS)
+fig1.update_layout(title="Traces horaires — Load, VRE, NRL, Surplus, Flex", height=480, xaxis_title="Heure", yaxis_title="MW", **PLOTLY_LAYOUT_DEFAULTS)
 fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Vue annuelle complete des composantes du bilan horaire.")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
@@ -121,16 +122,17 @@ render_commentary(
 )
 
 section_header("Distribution NRL et surplus non absorbe", "Histogrammes")
+st.caption("NRL colore par regime (gauche), surplus residuel (droite).")
 c1, c2 = st.columns(2)
 with c1:
     fig2 = px.histogram(df, x=COL_NRL, nbins=80, color=COL_REGIME, color_discrete_map=REGIME_COLORS)
-    fig2.update_layout(height=360, xaxis_title="NRL (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
+    fig2.update_layout(title="Distribution du NRL par regime", height=420, xaxis_title="NRL (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
     fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig2, use_container_width=True)
 with c2:
     fig3 = px.histogram(df, x=COL_SURPLUS_UNABS, nbins=60)
-    fig3.update_layout(height=360, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
+    fig3.update_layout(title="Distribution du surplus non absorbe", height=420, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
     fig3.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig3.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig3, use_container_width=True)
@@ -184,10 +186,11 @@ else:
         y=COL_PRICE_DA,
         color=COL_REGIME,
         color_discrete_map=REGIME_COLORS,
-        opacity=0.38,
+        opacity=0.5,
     )
     fig4.update_layout(
-        height=450,
+        title="NRL vs prix observe — correlation et coherence",
+        height=480,
         xaxis_title="NRL (MW)",
         yaxis_title="Prix observe (EUR/MWh)",
         legend_title="Regime",
@@ -195,28 +198,11 @@ else:
     )
     fig4.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig4.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
-    fig4.add_annotation(
-        x=0.01,
-        y=0.98,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        align="left",
-        text=(
-            f"Correlation: {stats['pearson_r_pct']:+.1f}%"
-            if np.isfinite(stats["pearson_r_pct"])
-            else "Correlation: N/A"
-        )
-        + "<br>"
-        + (
-            f"Coherence: {stats['regime_coherence_pct']:.1f}%"
-            if np.isfinite(stats["regime_coherence_pct"])
-            else "Coherence: N/A"
-        ),
-        font=dict(size=12, color="#1f2937"),
-        bgcolor="rgba(255,255,255,0.8)",
-    )
+    st.caption("Correlation NRL/prix et coherence regime/prix.")
     st.plotly_chart(fig4, use_container_width=True)
+    _corr_label = f"Correlation: {stats['pearson_r_pct']:+.1f}%" if np.isfinite(stats["pearson_r_pct"]) else "Correlation: N/A"
+    _coh_label = f"Coherence: {stats['regime_coherence_pct']:.1f}%" if np.isfinite(stats["regime_coherence_pct"]) else "Coherence: N/A"
+    st.caption(f"{_corr_label} | {_coh_label}")
 
 render_commentary(
     so_what_block(

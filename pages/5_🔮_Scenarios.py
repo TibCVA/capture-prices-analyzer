@@ -120,12 +120,13 @@ if st.button("Executer scenario", type="primary"):
         m_s = compute_annual_metrics(df_s, country, year, state["countries_cfg"][country])
 
     section_header("Resultats scenario", "Prix synthetic: affine par regimes, ancre sur TCA")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("SR", f"{m_s['sr']:.3f}", f"{(m_s['sr'] - m_base['sr']):+.3f}")
-    c2.metric("FAR", f"{m_s['far']:.3f}", f"{(m_s['far'] - m_base['far']):+.3f}")
-    c3.metric("h_regime_a", f"{m_s['h_regime_a']:.0f}", f"{(m_s['h_regime_a'] - m_base['h_regime_a']):+.0f}")
-    c4.metric("TTL", f"{m_s['ttl']:.1f}", f"{(m_s['ttl'] - m_base['ttl']):+.1f}")
-    c5.metric("capture_ratio_pv", f"{m_s['capture_ratio_pv']:.3f}", f"{(m_s['capture_ratio_pv'] - m_base['capture_ratio_pv']):+.3f}")
+    row1 = st.columns(3)
+    row1[0].metric("SR", f"{m_s['sr']:.3f}", f"{(m_s['sr'] - m_base['sr']):+.3f}")
+    row1[1].metric("FAR", f"{m_s['far']:.3f}", f"{(m_s['far'] - m_base['far']):+.3f}")
+    row1[2].metric("h_regime_a", f"{m_s['h_regime_a']:.0f}", f"{(m_s['h_regime_a'] - m_base['h_regime_a']):+.0f}")
+    row2 = st.columns(3)
+    row2[0].metric("TTL", f"{m_s['ttl']:.1f}", f"{(m_s['ttl'] - m_base['ttl']):+.1f}")
+    row2[1].metric("capture_ratio_pv", f"{m_s['capture_ratio_pv']:.3f}", f"{(m_s['capture_ratio_pv'] - m_base['capture_ratio_pv']):+.3f}")
 
     render_commentary(comment_scenario_delta(m_base, m_s))
 
@@ -145,9 +146,10 @@ if st.button("Executer scenario", type="primary"):
     )
     chart_df = coerce_numeric_columns(chart_df, ["baseline", "scenario"])
     fig1 = px.bar(chart_df, x="regime", y=["baseline", "scenario"], barmode="group")
-    fig1.update_layout(height=350, **PLOTLY_LAYOUT_DEFAULTS)
+    fig1.update_layout(height=420, title="Heures par regime — baseline vs scenario", **PLOTLY_LAYOUT_DEFAULTS)
     fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+    st.caption("Comparaison du nombre d'heures par regime avant/apres scenario.")
     st.plotly_chart(fig1, use_container_width=True)
 
     render_commentary(
@@ -167,9 +169,10 @@ if st.button("Executer scenario", type="primary"):
 
     section_header("Graphique 2 - Distribution price_used", "Scenario")
     fig2 = px.histogram(df_s, x="price_used_eur_mwh", nbins=80)
-    fig2.update_layout(height=350, **PLOTLY_LAYOUT_DEFAULTS)
+    fig2.update_layout(height=420, title="Distribution des prix mecanistes (scenario)", **PLOTLY_LAYOUT_DEFAULTS)
     fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+    st.caption("Distribution des prix synthetiques calcules par le scenario.")
     st.plotly_chart(fig2, use_container_width=True)
 
     render_commentary(

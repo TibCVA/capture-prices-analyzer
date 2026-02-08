@@ -266,13 +266,15 @@ with tabs[0]:
         hneg_ref = float(stage2.get("h_negative_min", 200))
         fig.add_hline(y=hneg_ref, line_dash="dash", line_color="#e11d48", annotation_text=f"h_neg={hneg_ref:.0f}")
         fig.update_layout(
-            height=410,
+            title="Surplus ratio vs heures a prix negatif",
+            height=480,
             xaxis_title="SR (surplus ratio)",
             yaxis_title="Heures negatives observees",
             **PLOTLY_LAYOUT_DEFAULTS,
         )
         fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
         fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.caption("Chaque point = 1 pays/annee. Seuil horizontal = reference.")
         st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(
@@ -338,9 +340,10 @@ with tabs[1]:
             text="r_squared",
         )
         fig.add_hline(y=0.0, line_dash="dot", line_color="#64748b")
-        fig.update_layout(height=390, xaxis_title="Pays", yaxis_title="Slope capture_ratio_pv vs penetration PV", **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_layout(title="Pentes de regression capture ratio PV", height=420, xaxis_title="Pays", yaxis_title="Slope capture_ratio_pv vs penetration PV", **PLOTLY_LAYOUT_DEFAULTS)
         fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
         fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.caption("Barres = pente annuelle. Couleur = significativite statistique.")
         st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(
@@ -400,9 +403,10 @@ with tabs[2]:
         stage3 = thresholds.get("phase_thresholds", {}).get("stage_3", {})
         far_ref = float(stage3.get("far_min", 0.60))
         fig.add_vline(x=far_ref, line_dash="dash", line_color="#2563eb", annotation_text=f"FAR={far_ref:.2f}")
-        fig.update_layout(height=405, xaxis_title="FAR", yaxis_title="Heures negatives observees", **PLOTLY_LAYOUT_DEFAULTS)
+        fig.update_layout(title="FAR vs heures a prix negatif", height=480, xaxis_title="FAR", yaxis_title="Heures negatives observees", **PLOTLY_LAYOUT_DEFAULTS)
         fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
         fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+        st.caption("Chaque point = 1 pays/annee. Seuil vertical = FAR cible.")
         st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(
@@ -516,7 +520,8 @@ with tabs[3]:
                 )
             )
             fig.update_layout(
-                height=410,
+                title="Sweep BESS — FAR et heures regime A (reference)",
+                height=480,
                 xaxis_title="BESS supplementaire (GW)",
                 yaxis=dict(title="FAR"),
                 yaxis2=dict(title="h_regime_a", overlaying="y", side="right"),
@@ -524,6 +529,7 @@ with tabs[3]:
             )
             fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
             fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+            st.caption("Axe gauche = FAR. Axe droit = heures regime A. Chaque point = +N GW BESS.")
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(out_df, use_container_width=True, hide_index=True)
 
@@ -631,7 +637,8 @@ with tabs[3]:
                         )
                     )
                     fig_s.update_layout(
-                        height=410,
+                        title="Sweep BESS — FAR et heures regime A (stress)",
+                        height=480,
                         xaxis_title="BESS supplementaire (GW)",
                         yaxis=dict(title="FAR (stress)"),
                         yaxis2=dict(title="h_regime_a (stress)", overlaying="y", side="right"),
@@ -639,6 +646,7 @@ with tabs[3]:
                     )
                     fig_s.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
                     fig_s.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+                    st.caption("Meme lecture que ci-dessus, appliquee au scenario de stress.")
                     st.plotly_chart(fig_s, use_container_width=True)
                     st.dataframe(stress_sweep, use_container_width=True, hide_index=True)
 
@@ -682,13 +690,15 @@ with tabs[4]:
 
     fig = go.Figure(data=go.Heatmap(x=gas, y=co2, z=tca, colorscale="YlOrRd"))
     fig.update_layout(
-        height=430,
+        title="Sensibilite TCA au gaz et CO2",
+        height=420,
         xaxis_title="Gaz EUR/MWh_th",
         yaxis_title="CO2 EUR/t",
         **PLOTLY_LAYOUT_DEFAULTS,
     )
     fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+    st.caption("Couleur = TCA en EUR/MWh. Axes = hypotheses de prix gaz et CO2.")
     st.plotly_chart(fig, use_container_width=True)
 
     table = pd.DataFrame({"gas": [20, 30, 50, 70], "co2": [40, 80, 120, 160]})
@@ -740,9 +750,10 @@ with tabs[5]:
             line=dict(color="#ea580c", width=2, dash="dash"),
         )
     )
-    fig.update_layout(height=365, xaxis_title="Duree (h)", yaxis_title="Energie utile relative", **PLOTLY_LAYOUT_DEFAULTS)
+    fig.update_layout(title="Duree de rentabilite BESS vs thermique", height=420, xaxis_title="Duree (h)", yaxis_title="Energie utile relative", **PLOTLY_LAYOUT_DEFAULTS)
     fig.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+    st.caption("Duree equivalente pleine puissance pour atteindre le seuil de rentabilite.")
     st.plotly_chart(fig, use_container_width=True)
 
     table = pd.DataFrame(

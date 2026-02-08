@@ -11,7 +11,7 @@ from plotly.subplots import make_subplots
 
 from src.commentary_bridge import so_what_block
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
-from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
+from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS, REGIME_COLORS
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,
@@ -128,10 +128,11 @@ fig1.add_trace(
     ),
     secondary_y=True,
 )
-fig1.update_layout(height=480, barmode="group", xaxis_title="Annee", **PLOTLY_LAYOUT_DEFAULTS)
+fig1.update_layout(title="Heures negatives, capture ratio PV et penetration", height=480, barmode="group", xaxis_title="Annee", **PLOTLY_LAYOUT_DEFAULTS)
 fig1.update_yaxes(title_text="Heures observees", secondary_y=False)
 fig1.update_yaxes(title_text="Ratio / part", secondary_y=True)
 fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Barres = heures negatives/basses. Lignes = capture ratio et penetration PV.")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
@@ -151,15 +152,23 @@ render_commentary(
 )
 
 section_header("Repartition des regimes A/B/C/D", "Heures annuelles par regime")
+_regime_bar_colors = {
+    "h_regime_a": REGIME_COLORS.get("A", "#d73027"),
+    "h_regime_b": REGIME_COLORS.get("B", "#fc8d59"),
+    "h_regime_c": REGIME_COLORS.get("C", "#4575b4"),
+    "h_regime_d": REGIME_COLORS.get("D", "#313695"),
+}
 fig2 = px.bar(
     df_vis,
     x="year",
     y=["h_regime_a", "h_regime_b", "h_regime_c", "h_regime_d"],
     labels={"value": "Heures", "variable": "Regime"},
+    color_discrete_map=_regime_bar_colors,
 )
-fig2.update_layout(height=390, **PLOTLY_LAYOUT_DEFAULTS)
+fig2.update_layout(title="Repartition annuelle des regimes A/B/C/D", height=420, **PLOTLY_LAYOUT_DEFAULTS)
 fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Heures passees dans chaque regime physique par annee.")
 st.plotly_chart(fig2, use_container_width=True)
 
 render_commentary(

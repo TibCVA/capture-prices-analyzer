@@ -88,9 +88,10 @@ for c in sorted(plot_df["country"].unique()):
         y_line = slope["slope"] * x_line + slope["intercept"]
         fig1.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines", name=f"{c} reg", showlegend=False))
 
-fig1.update_layout(height=430, **PLOTLY_LAYOUT_DEFAULTS)
+fig1.update_layout(height=480, title="Penetration VRE vs capture ratio PV", **PLOTLY_LAYOUT_DEFAULTS)
 fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Chaque point = 1 pays/annee. Droite = regression lineaire.")
 st.plotly_chart(fig1, use_container_width=True)
 
 slope_all = compute_slope(
@@ -130,10 +131,11 @@ for k in pairs:
         continue
     xx = np.linspace(0, 100, len(yy))
     fig2.add_trace(go.Scatter(x=xx, y=yy, mode="lines", name=str(k[1])))
-fig2.update_layout(height=400, xaxis_title="% du temps", yaxis_title="EUR/MWh")
+fig2.update_layout(height=420, title="Price duration curve", xaxis_title="% du temps", yaxis_title="EUR/MWh")
 fig2.update_layout(**PLOTLY_LAYOUT_DEFAULTS)
 fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Courbe de monotone des prix tries par ordre decroissant.")
 st.plotly_chart(fig2, use_container_width=True)
 
 if pairs:
@@ -165,7 +167,8 @@ if years:
         tmp = pd.DataFrame({"price": d["price_da_eur_mwh"].values, "month": local.month, "hour": local.hour})
         pivot = tmp.pivot_table(index="month", columns="hour", values="price", aggfunc="mean")
         fig3 = px.imshow(pivot, aspect="auto", labels={"x": "Heure", "y": "Mois", "color": "EUR/MWh"})
-        fig3.update_layout(height=420, **PLOTLY_LAYOUT_DEFAULTS)
+        fig3.update_layout(height=420, title="Prix moyen observe (mois x heure locale)", **PLOTLY_LAYOUT_DEFAULTS)
+        st.caption("Couleur = prix moyen EUR/MWh. Structure saisonniere et diurne.")
         st.plotly_chart(fig3, use_container_width=True)
 
         render_commentary(

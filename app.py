@@ -363,12 +363,12 @@ latest_year = int(df_country["year"].max())
 latest = df_country[df_country["year"] == latest_year].iloc[0].to_dict()
 
 section_header("Tableau de bord", f"{selected_country} {latest_year}")
-cols = st.columns(5)
+cols = st.columns(4)
 cols[0].metric("SR", f"{float(latest.get('sr', float('nan'))):.3f}", help="Part du surplus brut sur la generation annuelle.")
 cols[1].metric("FAR", f"{float(latest.get('far', float('nan'))):.3f}", help="Part du surplus absorbee par la flexibilite.")
 cols[2].metric("IR", f"{float(latest.get('ir', float('nan'))):.3f}", help="Rigidite systeme: P10(must-run)/P10(load).")
 cols[3].metric("TTL", f"{float(latest.get('ttl', float('nan'))):.1f} EUR/MWh", help="Queue haute price_used sur regimes C+D.")
-cols[4].metric("Phase", str(latest.get("phase", "unknown")), help="Diagnostic de phase issu de thresholds.yaml.")
+st.metric("Phase", str(latest.get("phase", "unknown")), help="Diagnostic de phase issu de thresholds.yaml.")
 
 render_commentary(comment_kpi(latest, label="Lecture KPI"))
 

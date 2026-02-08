@@ -185,10 +185,11 @@ fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_NRL], name="NRL", line=dict(c
 fig1.add_trace(
     go.Scatter(x=df48.index, y=df48[COL_FLEX_EFFECTIVE], name="Flex effective", line=dict(color="#2563eb", width=1.5))
 )
-fig1.add_hline(y=0, line_dash="dot", line_color="#475569")
-fig1.update_layout(height=430, xaxis_title="Heure", yaxis_title="MW", **PLOTLY_LAYOUT_DEFAULTS)
+fig1.add_hline(y=0, line_dash="solid", line_width=1.5, line_color="#94a3b8")
+fig1.update_layout(title="Profil horaire 48h — Load, VRE, NRL", height=480, xaxis_title="Heure", yaxis_title="MW", **PLOTLY_LAYOUT_DEFAULTS)
 fig1.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig1.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Deux jours consecutifs pour observer le cycle diurne du NRL.")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
@@ -237,10 +238,11 @@ else:
         y=COL_PRICE_DA,
         color=COL_REGIME,
         color_discrete_map=REGIME_COLORS,
-        opacity=0.35,
+        opacity=0.5,
     )
     fig2.update_layout(
-        height=430,
+        title="NRL vs prix observe par regime",
+        height=480,
         xaxis_title="NRL (MW)",
         yaxis_title="Prix observe (EUR/MWh)",
         legend_title="Regime",
@@ -248,6 +250,7 @@ else:
     )
     fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+    st.caption("Chaque point = 1 heure. Couleur = regime physique.")
     st.plotly_chart(fig2, use_container_width=True)
 
 render_commentary(
@@ -305,16 +308,17 @@ with st.expander("Etape 8 - Limites et bon usage", expanded=True):
     )
 
 section_header("Distribution annuelle", "NRL et surplus non absorbe")
+st.caption("NRL colore par regime (gauche), surplus residuel (droite).")
 d1, d2 = st.columns(2)
 with d1:
     fig3 = px.histogram(df, x=COL_NRL, nbins=90, color=COL_REGIME, color_discrete_map=REGIME_COLORS)
-    fig3.update_layout(height=350, xaxis_title="NRL (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
+    fig3.update_layout(title="Distribution du NRL", height=420, xaxis_title="NRL (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
     fig3.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig3.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig3, use_container_width=True)
 with d2:
     fig4 = px.histogram(df, x=COL_SURPLUS_UNABS, nbins=80)
-    fig4.update_layout(height=350, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
+    fig4.update_layout(title="Distribution du surplus non absorbe", height=420, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Heures", **PLOTLY_LAYOUT_DEFAULTS)
     fig4.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
     fig4.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
     st.plotly_chart(fig4, use_container_width=True)

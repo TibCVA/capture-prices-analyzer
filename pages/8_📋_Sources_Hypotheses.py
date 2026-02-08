@@ -122,24 +122,25 @@ with tab_bess:
 
 with tab_price:
     st.markdown("#### Seuils observables prix")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
+    row1 = st.columns(3)
+    with row1[0]:
         ov["price_negative_threshold"] = st.number_input(
             "price_negative_threshold", min_value=-500.0, max_value=100.0, value=float(ov.get("price_negative_threshold", PRICE_NEGATIVE_THRESHOLD)), step=1.0
         )
-    with c2:
+    with row1[1]:
         ov["price_very_low_threshold"] = st.number_input(
             "price_very_low_threshold", min_value=-100.0, max_value=100.0, value=float(ov.get("price_very_low_threshold", PRICE_VERY_LOW_THRESHOLD)), step=1.0
         )
-    with c3:
+    with row1[2]:
         ov["price_high_threshold"] = st.number_input(
             "price_high_threshold", min_value=0.0, max_value=500.0, value=float(ov.get("price_high_threshold", PRICE_HIGH_THRESHOLD)), step=5.0
         )
-    with c4:
+    row2 = st.columns(2)
+    with row2[0]:
         ov["price_very_high_threshold"] = st.number_input(
             "price_very_high_threshold", min_value=0.0, max_value=5000.0, value=float(ov.get("price_very_high_threshold", PRICE_VERY_HIGH_THRESHOLD)), step=10.0
         )
-    with c5:
+    with row2[1]:
         ov["spread_daily_threshold"] = st.number_input(
             "spread_daily_threshold", min_value=0.0, max_value=500.0, value=float(ov.get("spread_daily_threshold", SPREAD_DAILY_THRESHOLD)), step=5.0
         )

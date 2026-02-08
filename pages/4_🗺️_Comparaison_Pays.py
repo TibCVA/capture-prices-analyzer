@@ -106,15 +106,17 @@ for _, r in radar.iterrows():
             fill="toself",
             name=country,
             line=dict(color=COUNTRY_PALETTE.get(country, "#64748b"), width=2.0),
-            opacity=0.35,
+            opacity=0.5,
         )
     )
 
 fig1.update_layout(
-    height=500,
+    height=520,
+    title="Radar structurel de stress",
     polar=dict(radialaxis=dict(visible=True, range=[0, 1], tickfont=dict(size=10), gridcolor="#dbe5f1")),
     **PLOTLY_LAYOUT_DEFAULTS,
 )
+st.caption("Axes normalises 0-1. Plus la surface est large, plus le stress est eleve.")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
@@ -148,9 +150,10 @@ fig2 = px.scatter(
     color_discrete_map=COUNTRY_PALETTE,
     hover_data=["phase", "sr", "far", "ir", "ttl"],
 )
-fig2.update_layout(height=430, xaxis_title="Penetration VRE (% generation)", yaxis_title="Capture ratio PV", **PLOTLY_LAYOUT_DEFAULTS)
+fig2.update_layout(height=480, title="Penetration VRE vs capture ratio PV", xaxis_title="Penetration VRE (% generation)", yaxis_title="Capture ratio PV", **PLOTLY_LAYOUT_DEFAULTS)
 fig2.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig2.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Taille des bulles = nombre d'heures a prix negatif.")
 st.plotly_chart(fig2, use_container_width=True)
 
 render_commentary(
@@ -181,9 +184,10 @@ fig3 = px.bar(
     color_discrete_map=PHASE_COLORS,
     hover_data=["sr", "far", "ir", "capture_ratio_pv"],
 )
-fig3.update_layout(height=380, xaxis_title="Pays", yaxis_title="TTL (EUR/MWh)", **PLOTLY_LAYOUT_DEFAULTS)
+fig3.update_layout(height=420, title="Phase de marche vs TTL", xaxis_title="Pays", yaxis_title="TTL (EUR/MWh)", **PLOTLY_LAYOUT_DEFAULTS)
 fig3.update_xaxes(**PLOTLY_AXIS_DEFAULTS)
 fig3.update_yaxes(**PLOTLY_AXIS_DEFAULTS)
+st.caption("Classement par TTL decroissant. Couleur = phase de marche.")
 st.plotly_chart(fig3, use_container_width=True)
 
 render_commentary(
