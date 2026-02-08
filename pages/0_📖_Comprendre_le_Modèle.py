@@ -1,16 +1,14 @@
-﻿"""Page 0 - Comprendre le modele (version detaillee)."""
+﻿"""Page 0 - Comprendre le modele (version didactique complete)."""
 
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.commentary_engine import commentary_block
+from src.commentary_engine import so_what_block
 from src.constants import (
-    COL_FLEX_EFFECTIVE,
     COL_LOAD,
     COL_MUST_RUN,
     COL_NRL,
@@ -20,13 +18,18 @@ from src.constants import (
     COL_SURPLUS_UNABS,
     COL_VRE,
 )
-from src.ui_helpers import guard_no_data, inject_global_css, normalize_state_metrics, render_commentary, section
+from src.state_adapter import ensure_plot_columns, metrics_to_dataframe
+from src.ui_helpers import (
+    guard_no_data,
+    inject_global_css,
+    narrative,
+    normalize_state_metrics,
+    render_commentary,
+)
 
 st.set_page_config(page_title="Comprendre le modele", page_icon="📖", layout="wide")
 inject_global_css()
-
 st.title("📖 Comprendre le Modele")
-st.caption("Cadre methodologique v3.0: mecanismes physiques, ratios pivots et lecture analytique")
 
 state = st.session_state.get("state")
 if not state or not state.get("data_loaded"):
@@ -34,136 +37,195 @@ if not state or not state.get("data_loaded"):
 normalize_state_metrics(state)
 
 proc = state.get("processed", {})
-if not proc:
+metrics_df = metrics_to_dataframe(state, state.get("price_mode"))
+if not proc or metrics_df.empty:
     guard_no_data("la page Comprendre le modele")
 
-section("1) Pourquoi ce modele", "Du signal prix au mecanisme physique")
-st.markdown(
-    "Le modele relie directement les prix a la physique du systeme electrique.\n\n"
-    "- Point de depart: `NRL = load - VRE - must-run`.\n"
-    "- Si `NRL < 0`: surplus, pression sur les prix, apparition de prix tres bas/negatifs.\n"
-    "- Si `NRL > 0`: besoin thermique, ancrage des prix sur le cout marginal (TCA).\n"
-    "- Les regimes `A/B/C/D` sont classes **sans utiliser le prix** (anti-circularite)."
+narrative(
+    "Cette page explique le cadre analytique complet: pourquoi la NRL est la variable centrale, "
+    "comment les regimes A/B/C/D sont classes sans circularite, et comment lire les ratios pivots "
+    "SR/FAR/IR/TTL pour prendre des decisions business."
 )
 
-render_commentary(
-    commentary_block(
-        title="Logique de construction",
-        n_label="etapes", n_value=4,
-        observed={"regimes": 4, "ratios_pivots": 4},
-        method_link="Pipeline: NRL -> surplus/flex -> regimes -> TCA/prix -> metriques.",
-        limits="Cadre structurel: utile pour expliquer les mecanismes, pas pour prevoir finement le spot horaire.",
+with st.expander("Pourquoi cette analyse ?", expanded=True):
+    st.markdown(
+        """
+Le probleme business est simple: quand la penetration VRE augmente, les producteurs VRE produisent souvent ensemble, ce qui comprime les prix aux memes heures.
+
+Objectif de l'outil:
+1. expliquer les mecanismes physiques derriere les capture prices,
+2. quantifier des seuils auditables (pas de boite noire),
+3. tester des scenarios deterministes (BESS, demande, gaz/CO2).
+
+Le cadre retenu est volontairement structurel: on explique les ordres de grandeur et les bascules, pas une prevision spot fine.
+        """
     )
-)
 
-# pick a sample year/country from loaded data
+with st.expander("Merit order et capture ratio"):
+    st.markdown(
+        """
+Le prix spot est fixe par la derniere technologie necessaire a l'equilibre. Quand la production solaire/eolienne monte,
+la courbe d'offre se deplace vers les technologies moins couteuses, et les prix baissent surtout aux heures VRE.
+
+Definitions:
+- Capture price PV = somme(prix * production PV) / somme(production PV)
+- Capture ratio PV = capture price PV / prix baseload
+
+Lecture:
+- capture ratio proche de 1.0: peu de cannibalisation
+- capture ratio < 0.8: cannibalisation significative
+- capture ratio < 0.7: degradation severe
+        """
+    )
+
+with st.expander("Pourquoi la NRL ?", expanded=True):
+    st.latex(r"NRL = Load - VRE - Must\text{-}Run")
+    st.markdown(
+        """
+La NRL traduit directement la pression physique sur le systeme:
+- NRL < 0: surplus brut, risque de prix tres bas/negatifs
+- NRL > 0: besoin thermique, prix ancres sur le cout marginal (TCA)
+
+Le must-run est indispensable dans la formule: ignorer cette rigidite surestime la flexibilite et sous-estime les surplus.
+        """
+    )
+
+with st.expander("Regimes A/B/C/D et anti-circularite", expanded=True):
+    st.markdown(
+        """
+Classification strictement physique (pas de prix dans la regle):
+- A: surplus non absorbe
+- B: surplus absorbe
+- C: NRL positif hors queue haute
+- D: queue haute des NRL positifs
+
+Ensuite seulement, on verifie la coherence regime/prix observe. Cette separation evite la circularite.
+        """
+    )
+
+with st.expander("Stades et regles de bascule"):
+    st.markdown(
+        """
+Le diagnostic de phase se base sur un scoring (thresholds.yaml):
+- stage_1: faible stress (peu d'heures negatives, capture ratio eleve)
+- stage_2: premiers surplus marquants
+- stage_3: absorption structurelle (FAR eleve)
+- stage_4: saturation avancee
+
+Ce n'est pas un test causal; c'est un classement interpretable et reproductible.
+        """
+    )
+
+with st.expander("Ratios pivots SR / FAR / IR / TTL", expanded=True):
+    st.markdown(
+        """
+- SR (Surplus Ratio): volume de surplus brut rapporte a la generation annuelle
+- FAR (Flex Absorption Ratio): part du surplus absorbee
+- IR (Inflexibility Ratio): rigidite systeme au creux (P10 must-run / P10 load)
+- TTL (Thermal Tail Level): queue haute des prix en regimes C+D
+
+Ces 4 ratios sont la colonne vertebrale de l'interpretation business.
+        """
+    )
+
 pairs = sorted({(k[0], k[1]) for k in proc.keys()})
-country = st.selectbox("Pays (exemple didactique)", sorted({p[0] for p in pairs}), key="model_country")
-year = st.selectbox("Annee (exemple didactique)", sorted({p[1] for p in pairs if p[0] == country}), key="model_year")
+country = st.selectbox("Pays exemple", sorted({p[0] for p in pairs}), key="model_country_v3")
+year = st.selectbox("Annee exemple", sorted({p[1] for p in pairs if p[0] == country}), key="model_year_v3")
+
 proc_key = (country, year, state["must_run_mode"], state["flex_model_mode"], state["price_mode"])
 if proc_key not in proc:
-    guard_no_data("la page Comprendre le modele")
+    fallback = [k for k in proc.keys() if k[0] == country and k[1] == year]
+    if not fallback:
+        guard_no_data("la page Comprendre le modele")
+    proc_key = sorted(fallback)[0]
 
-df = proc[proc_key]
+df = ensure_plot_columns(
+    proc[proc_key],
+    [COL_LOAD, COL_VRE, COL_MUST_RUN, COL_NRL, COL_SURPLUS, COL_SURPLUS_UNABS, COL_REGIME, COL_PRICE_DA],
+)
 
-section("2) Exemple temporel 48h", "Load, VRE, Must-run, NRL, surplus")
+st.markdown("### Exemple temporel 48h")
 df48 = df.head(48).copy()
 fig1 = go.Figure()
-fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_LOAD], name="Load", line=dict(color="#111827", width=2)))
-fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_VRE], name="VRE", line=dict(color="#16a34a", width=2)))
-fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_MUST_RUN], name="Must-run", line=dict(color="#6b7280", width=2)))
-fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_NRL], name="NRL", line=dict(color="#dc2626", width=2, dash="dash")))
-fig1.add_hline(y=0, line_dash="dot", line_color="#334155")
-fig1.update_layout(height=430, xaxis_title="Heure", yaxis_title="MW")
+fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_LOAD], name="Load", line=dict(color="#1B2A4A", width=2)))
+fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_VRE], name="VRE", line=dict(color="#27AE60", width=2)))
+fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_MUST_RUN], name="Must-run", line=dict(color="#7F8C8D", width=2)))
+fig1.add_trace(go.Scatter(x=df48.index, y=df48[COL_NRL], name="NRL", line=dict(color="#E74C3C", width=2, dash="dash")))
+fig1.add_hline(y=0, line_dash="dot", line_color="#555")
+fig1.update_layout(height=420, xaxis_title="Heure", yaxis_title="MW")
 st.plotly_chart(fig1, use_container_width=True)
 
 render_commentary(
-    commentary_block(
+    so_what_block(
         title="Lecture 48h",
-        n_label="heures", n_value=len(df48),
+        purpose="Verifier visuellement quand le systeme bascule en surplus et donc en risque de pression prix",
         observed={
             "nrl_min_mw": float(df48[COL_NRL].min()),
             "nrl_max_mw": float(df48[COL_NRL].max()),
             "h_nrl_neg": int((df48[COL_NRL] < 0).sum()),
         },
-        method_link="Le surplus brut est `max(0, -NRL)` avant absorption par la flex.",
-        limits="Fenetre 48h illustrative; la robustesse des conclusions se lit sur l'annee complete.",
+        method_link="Surplus brut = max(0, -NRL), puis absorption par flex_effective.",
+        limits="Fenetre illustrative: la robustesse de diagnostic se lit sur l'annee complete.",
+        n=len(df48),
     )
 )
 
-section("3) Distribution annuelle", "Comment lire les zones de regime")
-col_left, col_right = st.columns(2)
-with col_left:
+st.markdown("### Distribution annuelle")
+col1, col2 = st.columns(2)
+with col1:
     fig2 = px.histogram(df, x=COL_NRL, nbins=100, color=COL_REGIME)
-    fig2.update_layout(height=360, xaxis_title="NRL (MW)", yaxis_title="Nombre d'heures")
+    fig2.update_layout(height=360, xaxis_title="NRL (MW)", yaxis_title="Heures")
     st.plotly_chart(fig2, use_container_width=True)
-with col_right:
+with col2:
     fig3 = px.histogram(df, x=COL_SURPLUS_UNABS, nbins=80)
-    fig3.update_layout(height=360, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Nombre d'heures")
+    fig3.update_layout(height=360, xaxis_title="Surplus non absorbe (MW)", yaxis_title="Heures")
     st.plotly_chart(fig3, use_container_width=True)
 
 render_commentary(
-    commentary_block(
-        title="Structure annuelle des regimes",
-        n_label="heures", n_value=len(df),
+    so_what_block(
+        title="Structure des regimes",
+        purpose="Mesurer le poids relatif des heures de surplus non absorbe (regime A), cle pour les risques de cannibalisation",
         observed={
-            "h_regime_A": int((df[COL_REGIME] == "A").sum()),
-            "h_regime_B": int((df[COL_REGIME] == "B").sum()),
-            "h_regime_C": int((df[COL_REGIME] == "C").sum()),
-            "h_regime_D": int((df[COL_REGIME] == "D").sum()),
+            "h_A": int((df[COL_REGIME] == "A").sum()),
+            "h_B": int((df[COL_REGIME] == "B").sum()),
+            "h_C": int((df[COL_REGIME] == "C").sum()),
+            "h_D": int((df[COL_REGIME] == "D").sum()),
         },
-        method_link="A: surplus non absorbe, B: surplus absorbe, C/D: heures a NRL positif.",
-        limits="La frontiere C/D depend du parametre `thresholds.model_params.regime_d`.",
+        method_link="Regimes classes par variables physiques uniquement (anti-circularite).",
+        limits="Le seuil C/D depend du parametrage regime_d dans thresholds.yaml.",
+        n=len(df),
     )
 )
 
-section("4) Prix observes et ancre thermique", "Validation regime/prix")
-fig4 = px.scatter(
-    df.dropna(subset=[COL_NRL, COL_PRICE_DA]),
-    x=COL_NRL,
-    y=COL_PRICE_DA,
-    color=COL_REGIME,
-    opacity=0.35,
-)
-fig4.update_layout(height=420, xaxis_title="NRL (MW)", yaxis_title="Prix observe (EUR/MWh)")
-st.plotly_chart(fig4, use_container_width=True)
+st.markdown("### Coherence regime/prix observe")
+scatter_df = df[[COL_NRL, COL_PRICE_DA, COL_REGIME]].dropna().copy()
+if not scatter_df.empty:
+    fig4 = px.scatter(scatter_df, x=COL_NRL, y=COL_PRICE_DA, color=COL_REGIME, opacity=0.35)
+    fig4.update_layout(height=420, xaxis_title="NRL (MW)", yaxis_title="Prix observe (EUR/MWh)")
+    st.plotly_chart(fig4, use_container_width=True)
 
-coh = np.nan
-if "regime_coherence" in state.get("metrics", {}).get((country, year, state["price_mode"]), {}):
-    coh = state["metrics"][(country, year, state["price_mode"])]["regime_coherence"]
+row = metrics_df[(metrics_df["country"] == country) & (metrics_df["year"] == year)]
+coh = float("nan")
+if not row.empty:
+    coh = float(row.iloc[0].get("regime_coherence", np.nan))
 
 render_commentary(
-    commentary_block(
-        title="Cohérence regime/prix",
-        n_label="points valides",
-        n_value=int(df[[COL_NRL, COL_PRICE_DA]].dropna().shape[0]),
+    so_what_block(
+        title="Validation externe",
+        purpose="Evaluer si la lecture physique des regimes explique correctement les niveaux de prix observes",
         observed={"coherence": coh},
-        method_link="Le score mesure l'alignement des prix observes avec les regimes physiques classes ex ante.",
-        limits="Seuil indicatif >55%; en dessous, revoir configuration/flex/donnees avant interpretation forte.",
+        method_link="Score calcule uniquement en mode observed selon coherence_params.",
+        limits="Un score faible peut venir de donnees incompletes ou d'hypotheses non calibrees, pas uniquement d'un bug.",
+        n=len(scatter_df),
     )
 )
 
-section("5) Ratios pivots a retenir", "SR / FAR / IR / TTL")
-metric_key = (country, year, state["price_mode"])
-m = state.get("metrics", {}).get(metric_key)
-if m:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("SR", f"{m.get('sr', float('nan')):.3f}")
-    c2.metric("FAR", f"{m.get('far', float('nan')):.3f}")
-    c3.metric("IR", f"{m.get('ir', float('nan')):.3f}")
-    c4.metric("TTL", f"{m.get('ttl', float('nan')):.1f} EUR/MWh")
-
-    render_commentary(
-        commentary_block(
-            title="Synthese des ratios",
-            n_label="annee", n_value=1,
-            observed={
-                "SR": m.get("sr"),
-                "FAR": m.get("far"),
-                "IR": m.get("ir"),
-                "TTL": m.get("ttl"),
-            },
-            method_link="Ratios calcules strictement selon les definitions de la spec G.7.",
-            limits="Les ratios ne remplacent pas une analyse causale complete; ils structurent le diagnostic.",
-        )
-    )
+st.markdown("### Ce que le modele ne capture pas")
+st.markdown(
+    """
+- Pas de prevision spot fine; le prix synth est un proxy structurel.
+- Pas de dispatch unitaire complet ni de congestion intra-zone.
+- Les scenarios restent deterministes (pas d'incertitude probabiliste).
+- Le diagnostic phase est heuristique, pas econometrique causal.
+    """
+)

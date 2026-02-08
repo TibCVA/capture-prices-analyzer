@@ -54,6 +54,15 @@ def _safe_float(v) -> float:
     return float(v)
 
 
+def _ov_float(df: pd.DataFrame, key: str, default: float) -> float:
+    overrides = df.attrs.get("ui_overrides", {}) if hasattr(df, "attrs") else {}
+    val = overrides.get(key, default)
+    try:
+        return float(val)
+    except Exception:
+        return float(default)
+
+
 def _capture_rate(price_used: pd.Series, production: pd.Series) -> float:
     prod = production.fillna(0.0)
     total = float(prod.sum())
@@ -107,6 +116,12 @@ def compute_annual_metrics(df: pd.DataFrame, country_key: str, year: int, countr
     price_used = df[COL_PRICE_USED]
     price_obs = df[COL_PRICE_DA] if COL_PRICE_DA in df.columns else pd.Series(np.nan, index=df.index)
 
+    price_negative_threshold = _ov_float(df, "price_negative_threshold", PRICE_NEGATIVE_THRESHOLD)
+    price_very_low_threshold = _ov_float(df, "price_very_low_threshold", PRICE_VERY_LOW_THRESHOLD)
+    price_high_threshold = _ov_float(df, "price_high_threshold", PRICE_HIGH_THRESHOLD)
+    price_very_high_threshold = _ov_float(df, "price_very_high_threshold", PRICE_VERY_HIGH_THRESHOLD)
+    spread_daily_threshold = _ov_float(df, "spread_daily_threshold", SPREAD_DAILY_THRESHOLD)
+
     used_stats = _price_stats(price_used)
     obs_stats = _price_stats(price_obs)
 
@@ -121,13 +136,13 @@ def compute_annual_metrics(df: pd.DataFrame, country_key: str, year: int, countr
     baseload_price_obs = obs_stats["mean"]
 
     # Observable counts strictly on observed price
-    h_negative_obs = int((price_obs < PRICE_NEGATIVE_THRESHOLD).sum())
-    h_below_5_obs = int((price_obs < PRICE_VERY_LOW_THRESHOLD).sum())
-    h_above_100_obs = int((price_obs > PRICE_HIGH_THRESHOLD).sum())
-    h_above_200_obs = int((price_obs > PRICE_VERY_HIGH_THRESHOLD).sum())
+    h_negative_obs = int((price_obs < price_negative_threshold).sum())
+    h_below_5_obs = int((price_obs < price_very_low_threshold).sum())
+    h_above_100_obs = int((price_obs > price_high_threshold).sum())
+    h_above_200_obs = int((price_obs > price_very_high_threshold).sum())
 
     daily_spread_obs = _daily_spreads_observed(price_obs, tz)
-    days_spread_above_50_obs = int((daily_spread_obs > SPREAD_DAILY_THRESHOLD).sum())
+    days_spread_above_50_obs = int((daily_spread_obs > spread_daily_threshold).sum())
     avg_daily_spread_obs = float(daily_spread_obs.mean()) if not daily_spread_obs.empty else float("nan")
     max_daily_spread_obs = float(daily_spread_obs.max()) if not daily_spread_obs.empty else float("nan")
 

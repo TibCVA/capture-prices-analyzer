@@ -164,28 +164,29 @@ def _dispatch_bess(
     sink_non_bess: pd.Series,
     bess_power_mw: float,
     bess_energy_mwh: float,
+    eta_charge: float,
+    eta_discharge: float,
+    soc_init_frac: float,
 ) -> tuple[pd.Series, pd.Series, pd.Series]:
     charge = np.zeros(len(nrl), dtype=float)
     discharge = np.zeros(len(nrl), dtype=float)
     soc_series = np.zeros(len(nrl), dtype=float)
 
-    soc = BESS_SOC_INIT_FRAC * bess_energy_mwh
+    soc = soc_init_frac * bess_energy_mwh
 
     for i in range(len(nrl)):
         surplus_after_non_bess = max(0.0, float(surplus.iloc[i]) - float(sink_non_bess.iloc[i]))
 
         charge_limit_power = bess_power_mw
-        charge_limit_energy = (
-            (bess_energy_mwh - soc) / BESS_ETA_CHARGE if BESS_ETA_CHARGE > 0 else 0.0
-        )
+        charge_limit_energy = (bess_energy_mwh - soc) / eta_charge if eta_charge > 0 else 0.0
         charge_i = min(surplus_after_non_bess, charge_limit_power, max(0.0, charge_limit_energy))
-        soc += charge_i * BESS_ETA_CHARGE
+        soc += charge_i * eta_charge
 
         deficit = max(0.0, float(nrl.iloc[i]))
         discharge_limit_power = bess_power_mw
-        discharge_limit_energy = soc * BESS_ETA_DISCHARGE
+        discharge_limit_energy = soc * eta_discharge
         discharge_i = min(deficit, discharge_limit_power, max(0.0, discharge_limit_energy))
-        soc -= discharge_i / BESS_ETA_DISCHARGE if BESS_ETA_DISCHARGE > 0 else 0.0
+        soc -= discharge_i / eta_discharge if eta_discharge > 0 else 0.0
 
         charge[i] = charge_i
         discharge[i] = discharge_i
@@ -296,6 +297,13 @@ def compute_nrl(
 
     scenario_overrides = scenario_overrides or {}
 
+    def _ov(key: str, default: float) -> float:
+        val = scenario_overrides.get(key, default)
+        try:
+            return float(val)
+        except Exception:
+            return float(default)
+
     if bool(df_raw.attrs.get("derived_net_position_from_generation_minus_load", False)):
         raise NotImplementedError(
             "Spec ambigue : approximation exports via generation-load interdite (section I.1)"
@@ -361,12 +369,22 @@ def compute_nrl(
     )
 
     # Step 7 — Sequential BESS dispatch
+    eta_charge = _ov("bess_eta_charge", BESS_ETA_CHARGE)
+    eta_discharge = _ov("bess_eta_discharge", BESS_ETA_DISCHARGE)
+    soc_init_frac = _ov("bess_soc_init_frac", BESS_SOC_INIT_FRAC)
+    eta_charge = min(max(eta_charge, 1e-6), 1.0)
+    eta_discharge = min(max(eta_discharge, 1e-6), 1.0)
+    soc_init_frac = min(max(soc_init_frac, 0.0), 1.0)
+
     bess_charge, bess_discharge, bess_soc = _dispatch_bess(
         nrl=df[COL_NRL],
         surplus=df[COL_SURPLUS],
         sink_non_bess=df[COL_SINK_NON_BESS],
         bess_power_mw=bess_power_mw,
         bess_energy_mwh=bess_energy_mwh,
+        eta_charge=eta_charge,
+        eta_discharge=eta_discharge,
+        soc_init_frac=soc_init_frac,
     )
     df[COL_BESS_CHARGE] = bess_charge
     df[COL_BESS_DISCHARGE] = bess_discharge
@@ -404,6 +422,7 @@ def compute_nrl(
     df.attrs["must_run_mode"] = mr_mode
     df.attrs["flex_model_mode"] = flex_mode
     df.attrs["price_mode"] = price_mode
+    df.attrs["ui_overrides"] = dict(scenario_overrides)
 
     if COL_HAS_GAP not in df.columns:
         df[COL_HAS_GAP] = df[COL_LOAD].isna() | df[COL_PRICE_DA].isna()

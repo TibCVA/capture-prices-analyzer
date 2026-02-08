@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from src.commentary_engine import comment_kpi
+from src.commentary_engine import comment_kpi, so_what_block
 from src.config_loader import load_countries_config, load_scenarios, load_thresholds
 from src.data_fetcher import fetch_country_year
 from src.data_loader import (
     list_processed_keys,
     load_commodity_prices,
-    load_diagnostics,
     load_metrics,
     load_processed,
     load_raw,
@@ -26,12 +24,33 @@ from src.data_loader import (
 from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
 from src.phase_diagnostics import diagnose_phase
-from src.ui_helpers import guard_no_data, inject_global_css, render_commentary, section
+from src.state_adapter import metrics_to_dataframe, normalize_metrics_record, normalize_state_metrics
+from src.ui_helpers import dynamic_narrative, info_card, inject_global_css, narrative, render_commentary, section_header
 
 load_dotenv()
 
 st.set_page_config(page_title="Capture Prices Analyzer", page_icon="⚡", layout="wide")
 inject_global_css()
+
+
+_REQUIRED_METRICS_KEYS = {
+    "sr",
+    "far",
+    "ir",
+    "ttl",
+    "capture_ratio_pv",
+    "capture_ratio_wind",
+    "h_regime_a",
+    "h_regime_b",
+    "h_regime_c",
+    "h_regime_d",
+    "h_negative_obs",
+    "h_below_5_obs",
+    "pv_penetration_pct_gen",
+    "wind_penetration_pct_gen",
+    "vre_penetration_pct_gen",
+    "price_used_p95",
+}
 
 
 def _init_state() -> None:
@@ -53,15 +72,13 @@ def _init_state() -> None:
             "countries_cfg": None,
             "thresholds": None,
             "scenarios": None,
+            "ui_overrides": {},
         }
 
 
 @st.cache_data(show_spinner=False)
 def _cached_configs():
-    countries_cfg = load_countries_config()
-    thresholds = load_thresholds()
-    scenarios = load_scenarios()
-    return countries_cfg, thresholds, scenarios
+    return load_countries_config(), load_thresholds(), load_scenarios()
 
 
 @st.cache_data(show_spinner=False)
@@ -69,51 +86,23 @@ def _cached_commodities():
     return load_commodity_prices()
 
 
-_REQUIRED_METRICS_KEYS = {
-    "sr",
-    "far",
-    "ir",
-    "ttl",
-    "capture_ratio_pv",
-    "capture_ratio_wind",
-    "h_regime_a",
-    "h_regime_b",
-    "h_regime_c",
-    "h_regime_d",
-    "h_negative_obs",
-    "h_below_5_obs",
-    "pv_penetration_pct_gen",
-    "wind_penetration_pct_gen",
-    "vre_penetration_pct_gen",
-    "price_used_p95",
-    "regime_coherence",
-}
-
-
-def _normalize_metrics_legacy(m: dict) -> dict:
-    out = dict(m)
-    if "h_negative_obs" not in out and "h_negative" in out:
-        out["h_negative_obs"] = out["h_negative"]
-    if "h_below_5_obs" not in out and "h_below_5" in out:
-        out["h_below_5_obs"] = out["h_below_5"]
-    if "h_regime_d" not in out and "h_regime_d_tail" in out:
-        out["h_regime_d"] = out["h_regime_d_tail"]
-    if "far" not in out and "far_structural" in out:
-        out["far"] = out["far_structural"]
-    if "pv_penetration_pct_gen" not in out and "pv_share" in out:
-        out["pv_penetration_pct_gen"] = float(out["pv_share"]) * 100.0
-    if "wind_penetration_pct_gen" not in out and "wind_share" in out:
-        out["wind_penetration_pct_gen"] = float(out["wind_share"]) * 100.0
-    if "vre_penetration_pct_gen" not in out and "vre_share" in out:
-        out["vre_penetration_pct_gen"] = float(out["vre_share"]) * 100.0
-    return out
-
-
 def _metrics_schema_ok(metrics: dict | None) -> bool:
     if not isinstance(metrics, dict):
         return False
-    normalized = _normalize_metrics_legacy(metrics)
+    normalized = normalize_metrics_record(metrics)
     return _REQUIRED_METRICS_KEYS.issubset(set(normalized.keys()))
+
+
+def _runtime_overrides(s: dict) -> dict:
+    raw = s.get("ui_overrides", {})
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        if v is None:
+            continue
+        out[k] = v
+    return out
 
 
 def _load_one(country: str, year: int, s: dict):
@@ -125,7 +114,10 @@ def _load_one(country: str, year: int, s: dict):
     flex = s["flex_model_mode"]
     price_mode = s["price_mode"]
 
-    df_proc = load_processed(country, year, mr, flex, price_mode)
+    runtime_overrides = _runtime_overrides(s)
+    use_runtime_overrides = bool(runtime_overrides)
+
+    df_proc = None if use_runtime_overrides else load_processed(country, year, mr, flex, price_mode)
     df_raw = None
 
     if df_proc is None:
@@ -143,28 +135,29 @@ def _load_one(country: str, year: int, s: dict):
             commodities=commodities,
             must_run_mode=mr,
             flex_model_mode=flex,
-            scenario_overrides=None,
+            scenario_overrides=runtime_overrides or None,
             price_mode=price_mode,
         )
-        save_processed(df_proc, country, year, mr, flex, price_mode)
+
+        if not use_runtime_overrides:
+            save_processed(df_proc, country, year, mr, flex, price_mode)
     else:
         try:
             df_raw = load_raw(country, year)
         except FileNotFoundError:
             df_raw = None
 
-    # Always enforce v3 schema consistency: if cached metrics are legacy/incomplete,
-    # recompute from processed dataframe to avoid UI key errors.
-    metrics = load_metrics(country, year, price_mode)
-    if not _metrics_schema_ok(metrics):
+    metrics = None if use_runtime_overrides else load_metrics(country, year, price_mode)
+    if (not _metrics_schema_ok(metrics)) or use_runtime_overrides:
         metrics = compute_annual_metrics(df_proc, country, year, countries_cfg[country])
-        save_metrics(metrics, country, year, price_mode)
+        if not use_runtime_overrides:
+            save_metrics(metrics, country, year, price_mode)
     else:
-        metrics = _normalize_metrics_legacy(metrics)
+        metrics = normalize_metrics_record(metrics)
 
-    # Diagnostics are lightweight; recompute to stay aligned with thresholds + metric schema.
     diag = diagnose_phase(metrics, thresholds)
-    save_diagnostics(diag, country, year, price_mode)
+    if not use_runtime_overrides:
+        save_diagnostics(diag, country, year, price_mode)
 
     return country, year, df_raw, df_proc, metrics, diag
 
@@ -187,7 +180,7 @@ def _load_selected_data(s: dict) -> None:
 
             proc_key = (country, year, s["must_run_mode"], s["flex_model_mode"], s["price_mode"])
             s["processed"][proc_key] = df_proc
-            s["metrics"][(country, year, s["price_mode"])] = metrics
+            s["metrics"][(country, year, s["price_mode"])] = normalize_metrics_record(metrics)
             s["diagnostics"][(country, year)] = diag
 
             done += 1
@@ -200,16 +193,6 @@ def _load_selected_data(s: dict) -> None:
 _init_state()
 state = st.session_state.state
 
-# Session-safety: normalize any pre-existing legacy metrics keys in memory.
-if state.get("metrics"):
-    normalized_metrics = {}
-    for key, val in state["metrics"].items():
-        if isinstance(val, dict):
-            normalized_metrics[key] = _normalize_metrics_legacy(val)
-        else:
-            normalized_metrics[key] = val
-    state["metrics"] = normalized_metrics
-
 countries_cfg, thresholds, scenarios = _cached_configs()
 commodities = _cached_commodities()
 
@@ -218,46 +201,50 @@ state["thresholds"] = thresholds
 state["scenarios"] = scenarios
 state["commodities"] = commodities
 
+normalize_state_metrics(state)
 all_countries = sorted([k for k in countries_cfg.keys() if not k.startswith("__")])
+country_labels = {c: countries_cfg[c].get("name", c) for c in all_countries}
 
 with st.sidebar:
-    st.markdown("### Parametres")
-    _ = st.text_input(
-        "API key ENTSO-E",
-        value=os.getenv("ENTSOE_API_KEY", ""),
-        type="password",
-        help="Optionnel si le cache raw est deja present.",
-    )
+    st.markdown("#### Capture Prices Analyzer")
 
+    st.markdown("**Selection**")
     state["countries_selected"] = st.multiselect(
         "Pays",
         options=all_countries,
         default=[c for c in state["countries_selected"] if c in all_countries] or all_countries[:3],
+        format_func=lambda c: f"{c} - {country_labels.get(c, c)}",
     )
 
     state["year_range"] = st.slider("Periode", 2015, 2024, state["year_range"])
-    state["exclude_2022"] = st.checkbox("Exclure 2022 (regressions)", value=state["exclude_2022"])
 
-    state["must_run_mode"] = st.radio(
-        "Must-run mode",
-        ["observed", "floor"],
-        index=0 if state["must_run_mode"] == "observed" else 1,
-    )
-    state["flex_model_mode"] = st.radio(
-        "Flex mode",
-        ["observed", "capacity"],
-        index=0 if state["flex_model_mode"] == "observed" else 1,
-    )
-    state["price_mode"] = st.radio(
-        "Price mode historique",
-        ["observed", "synthetic"],
-        index=0 if state["price_mode"] == "observed" else 1,
-    )
-    state["scenario_price_mode"] = st.radio(
-        "Price mode scenario",
-        ["synthetic", "observed"],
-        index=0 if state["scenario_price_mode"] == "synthetic" else 1,
-    )
+    st.divider()
+
+    with st.expander("Modes de calcul", expanded=True):
+        state["must_run_mode"] = st.radio(
+            "Must-run",
+            ["observed", "floor"],
+            index=0 if state["must_run_mode"] == "observed" else 1,
+        )
+        state["flex_model_mode"] = st.radio(
+            "Flex",
+            ["observed", "capacity"],
+            index=0 if state["flex_model_mode"] == "observed" else 1,
+        )
+        state["price_mode"] = st.radio(
+            "Price mode historique",
+            ["observed", "synthetic"],
+            index=0 if state["price_mode"] == "observed" else 1,
+        )
+        state["scenario_price_mode"] = st.radio(
+            "Price mode scenario",
+            ["synthetic", "observed"],
+            index=0 if state["scenario_price_mode"] == "synthetic" else 1,
+        )
+
+    overrides_count = len(_runtime_overrides(state))
+    if overrides_count > 0:
+        st.warning(f"Hypotheses personnalisees actives: {overrides_count}")
 
     if st.button("Charger donnees", type="primary", use_container_width=True):
         if not state["countries_selected"]:
@@ -267,74 +254,146 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.markdown("### Statut")
+    st.markdown("**Statut**")
     if state["data_loaded"]:
         st.success(f"{len(state['metrics'])} couples pays/annee charges")
+        available = list_processed_keys(
+            must_run_mode=state["must_run_mode"],
+            flex_model_mode=state["flex_model_mode"],
+            price_mode=state["price_mode"],
+        )
+        st.caption(f"Caches process disponibles: {len(available)}")
     else:
         st.info("Aucune donnee chargee")
 
-st.title("⚡ Capture Prices Analyzer")
-st.caption("Modele v3.0 — SR/FAR/IR/TTL, regimes physiques A/B/C/D, scenarios deterministes")
+st.title("Capture Prices Analyzer")
+st.caption("Framework v3.0 - NRL, regimes A/B/C/D, SR/FAR/IR/TTL, scenarios deterministes")
 
 if not state["data_loaded"]:
-    section("Demarrage", "Chargez les donnees depuis la barre laterale pour activer toutes les pages.")
+    section_header("Bienvenue", "Analyse rigoureuse des capture prices renouvelables")
+    narrative(
+        "L'outil relie les prix de marche aux mecanismes physiques du systeme: "
+        "NRL, surplus, flexibilite, ancre thermique."
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        info_card("1. Selectionnez", "Choisissez pays, periode et modes dans la sidebar.")
+    with c2:
+        info_card("2. Chargez", "Cliquez sur Charger donnees pour lancer le pipeline complet.")
+    with c3:
+        info_card("3. Interpretez", "Lisez les pages avec commentaires So what traces sur les chiffres.")
+
+    st.markdown("### Architecture du modele")
     st.markdown(
-        "- Le pipeline est: donnees ENTSO-E -> NRL -> regimes A/B/C/D -> TCA/prix synth -> metriques annuelles.\n"
-        "- Les observables marche (prix negatifs, spreads) restent calcules sur prix observes.\n"
-        "- Les scenarios utilisent par defaut le prix synthetique ancre TCA."
+        """
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; margin:0.8rem 0 1.6rem 0;">
+            <div style="background:#ebf5fb; border:2px solid #3498db; border-radius:10px; padding:10px 24px; width:78%; max-width:560px; text-align:center;"><strong style="color:#2980b9;">Niveau 1</strong><br><span style="font-size:0.88rem;">Donnees ENTSO-E horaires (load, generation, prix, net position)</span></div>
+            <div style="color:#95a5a6;">&#x25BC;</div>
+            <div style="background:#e8f8f5; border:2px solid #27ae60; border-radius:10px; padding:10px 24px; width:78%; max-width:560px; text-align:center;"><strong style="color:#27ae60;">Niveau 2</strong><br><span style="font-size:0.88rem;">NRL = load - VRE - must-run</span></div>
+            <div style="color:#95a5a6;">&#x25BC;</div>
+            <div style="background:#fef9e7; border:2px solid #f39c12; border-radius:10px; padding:10px 24px; width:78%; max-width:560px; text-align:center;"><strong style="color:#e67e22;">Niveau 3</strong><br><span style="font-size:0.88rem;">Regimes physiques A / B / C / D (anti-circularite)</span></div>
+            <div style="color:#95a5a6;">&#x25BC;</div>
+            <div style="background:#f4ecf7; border:2px solid #8e44ad; border-radius:10px; padding:10px 24px; width:78%; max-width:560px; text-align:center;"><strong style="color:#8e44ad;">Niveau 4</strong><br><span style="font-size:0.88rem;">Metriques annuelles et diagnostic de phase</span></div>
+            <div style="color:#95a5a6;">&#x25BC;</div>
+            <div style="background:#fdecec; border:2px solid #e74c3c; border-radius:10px; padding:10px 24px; width:78%; max-width:560px; text-align:center;"><strong style="color:#c0392b;">Niveau 5</strong><br><span style="font-size:0.88rem;">Scenarios deterministes et interpretation business</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     st.stop()
 
-# Dashboard selection
-selected_country = state["countries_selected"][0]
-min_y, max_y = state["year_range"]
-latest_year = max_y
-metric_key = (selected_country, latest_year, state["price_mode"])
+metrics_df = metrics_to_dataframe(state, state["price_mode"])
+if metrics_df.empty:
+    st.info("Aucune metrique disponible pour les filtres actifs.")
+    st.stop()
 
-if metric_key not in state["metrics"]:
-    guard_no_data("le tableau de bord")
+selected_country = st.selectbox(
+    "Pays dashboard",
+    options=sorted(metrics_df["country"].dropna().unique()),
+    format_func=lambda c: f"{c} - {country_labels.get(c, c)}",
+)
 
-m = state["metrics"][metric_key]
-diag = state["diagnostics"].get((selected_country, latest_year), {})
+df_country = metrics_df[metrics_df["country"] == selected_country].copy()
+latest_year = int(df_country["year"].max())
+latest = df_country[df_country["year"] == latest_year].iloc[0].to_dict()
 
-section("KPI principaux", f"{selected_country} {latest_year}")
+section_header("Tableau de bord", f"{selected_country} {latest_year}")
+cols = st.columns(5)
+cols[0].metric("SR", f"{float(latest.get('sr', float('nan'))):.3f}", help="Part du surplus brut sur la generation annuelle.")
+cols[1].metric("FAR", f"{float(latest.get('far', float('nan'))):.3f}", help="Part du surplus absorbee par la flexibilite.")
+cols[2].metric("IR", f"{float(latest.get('ir', float('nan'))):.3f}", help="Rigidite systeme: P10(must-run)/P10(load).")
+cols[3].metric("TTL", f"{float(latest.get('ttl', float('nan'))):.1f} EUR/MWh", help="Queue haute price_used sur regimes C+D.")
+cols[4].metric("Phase", str(latest.get("phase", "unknown")), help="Diagnostic de phase issu de thresholds.yaml.")
 
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("SR", f"{m.get('sr', float('nan')):.3f}")
-col2.metric("FAR", f"{m.get('far', float('nan')):.3f}")
-col3.metric("IR", f"{m.get('ir', float('nan')):.3f}")
-col4.metric("TTL", f"{m.get('ttl', float('nan')):.1f} EUR/MWh")
-col5.metric("Phase", diag.get("phase", "unknown"))
+render_commentary(comment_kpi(latest, label="Lecture KPI"))
 
-render_commentary(comment_kpi(m, label="Lecture KPI"))
+if float(latest.get("regime_coherence", float("nan"))) == float(latest.get("regime_coherence", float("nan"))):
+    coh = float(latest.get("regime_coherence", float("nan")))
+    if coh < 0.55:
+        dynamic_narrative(
+            f"Coherence regime/prix observee faible ({coh:.1%} < 55%). "
+            "Avant interpretation forte, verifier hypotheses must-run/flex et completude donnees.",
+            severity="warning",
+        )
 
-section("Comparaison rapide pays", "Derniere annee chargee")
+section_header("Comparaison multi-pays", f"Annee {latest_year}")
 rows = []
 for c in state["countries_selected"]:
-    key = (c, latest_year, state["price_mode"])
-    if key not in state["metrics"]:
+    d = metrics_df[(metrics_df["country"] == c) & (metrics_df["year"] == latest_year)]
+    if d.empty:
         continue
-    mm = state["metrics"][key]
-    dd = state["diagnostics"].get((c, latest_year), {})
+    r = d.iloc[0]
     rows.append(
         {
             "country": c,
-            "sr": mm.get("sr"),
-            "far": mm.get("far"),
-            "ir": mm.get("ir"),
-            "ttl": mm.get("ttl"),
-            "capture_ratio_pv": mm.get("capture_ratio_pv"),
-            "h_negative_obs": mm.get("h_negative_obs"),
-            "phase": dd.get("phase", "unknown"),
+            "sr": r.get("sr"),
+            "far": r.get("far"),
+            "ir": r.get("ir"),
+            "ttl": r.get("ttl"),
+            "capture_ratio_pv": r.get("capture_ratio_pv"),
+            "h_negative_obs": r.get("h_negative_obs"),
+            "phase": r.get("phase", "unknown"),
         }
     )
 
 if rows:
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    df_cmp = pd.DataFrame(rows)
+    styled = df_cmp.style.format(
+        {
+            "sr": "{:.3f}",
+            "far": "{:.3f}",
+            "ir": "{:.3f}",
+            "ttl": "{:.1f}",
+            "capture_ratio_pv": "{:.3f}",
+            "h_negative_obs": "{:.0f}",
+        },
+        na_rep="--",
+    )
+    if df_cmp["far"].notna().any():
+        styled = styled.background_gradient(subset=["far"], cmap="RdYlGn", vmin=0.0, vmax=1.0)
+    if df_cmp["capture_ratio_pv"].notna().any():
+        styled = styled.background_gradient(subset=["capture_ratio_pv"], cmap="RdYlGn", vmin=0.5, vmax=1.0)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
-render_commentary(
-    "**Comparaison pays**\n"
-    f"- Constat chiffre: n={len(rows)} pays, annee={latest_year}.\n"
-    "- Lien methode: indicateurs calcules via G.7 sur un schema de donnees homogene.\n"
-    "- Limites/portee: comparaison sensible a la completude et au mode de prix selectionne."
-)
+    sr_median = float(df_cmp["sr"].median()) if df_cmp["sr"].notna().any() else float("nan")
+    far_median = float(df_cmp["far"].median()) if df_cmp["far"].notna().any() else float("nan")
+    h_negative_total = (
+        float(df_cmp["h_negative_obs"].sum()) if df_cmp["h_negative_obs"].notna().any() else float("nan")
+    )
+
+    render_commentary(
+        so_what_block(
+            title="Lecture comparative",
+            purpose="Identifier rapidement les pays les plus exposes a la cannibalisation et au surplus",
+            observed={
+                "n_pays": len(df_cmp),
+                "sr_median": sr_median,
+                "far_median": far_median,
+                "h_negative_total": h_negative_total,
+            },
+            method_link="Metriques harmonisees v3, price_mode unique, mapping legacy normalise.",
+            limits="Comparaison sensible a la completude des donnees et au contexte systeme propre a chaque pays.",
+            n=len(df_cmp),
+        )
+    )

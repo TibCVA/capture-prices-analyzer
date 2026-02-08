@@ -1,4 +1,4 @@
-ï»¿# Capture Prices Analyzer (v3.0)
+# Capture Prices Analyzer (v3.0)
 
 Outil d'analyse outside-in des capture prices renouvelables en Europe.
 
@@ -6,9 +6,10 @@ Outil d'analyse outside-in des capture prices renouvelables en Europe.
 - Historique 2015-2024 (FR/DE/ES/PL/DK)
 - Ratios pivots: `SR`, `FAR`, `IR`, `TCA/TTL`
 - Scenarios deterministes (sans Monte Carlo)
-- UI Streamlit multi-pages avec commentaires analytiques dynamiques
+- UI Streamlit multi-pages avec commentaires analytiques "So what"
+- Hypotheses session-modifiables depuis `Sources & Hypotheses`
 
-## Defs principales
+## Definitions principales
 - `NRL = load - VRE - must-run`
 - `SR = surplus annuel / generation annuelle totale`
 - `FAR = surplus absorbe / surplus brut` (`NaN` si surplus nul)
@@ -17,13 +18,31 @@ Outil d'analyse outside-in des capture prices renouvelables en Europe.
 
 ## Conventions critiques
 - Penetration RES en **% de generation annuelle totale**.
-- Les observables marche (`h_negative_obs`, spreads) sont calcules sur prix observes `price_da`.
-- La classification regime `A/B/C/D` utilise uniquement des variables physiques (anti-circularite).
+- Observables marche (`h_negative_obs`, spreads, etc.) calcules sur `price_da` observe.
+- Classification regime `A/B/C/D` strictement physique (anti-circularite).
 - Interdit: approximer exports par `generation - load`.
 
 ## Note ENTSO-E (load)
-`Actual Total Load` ENTSO-E incorpore `absorbed energy` (stockage/pompage).
-Consequence: le pompage est traite explicitement comme composante de flex et ne doit pas etre double-compte via `generation-load`.
+`Actual Total Load` ENTSO-E inclut `absorbed energy` (stockage/pompage).
+Consequence: le pompage doit etre traite explicitement comme composante de flex; pas de double comptage via `generation-load`.
+
+## Hypotheses modifiables UI
+Page `?? Sources & Hypotheses`:
+- Rendements/emissions/VOM thermiques
+- Parametres BESS de simulation
+- Seuils observables prix
+
+Ces hypotheses sont stockees dans `st.session_state.state['ui_overrides']` et appliquees au prochain `Charger donnees`.
+Les references par defaut restent `constants.py` et `config/*.yaml`.
+
+## Comment lire les commentaires analytiques
+Chaque ecran/graphique suit le format:
+1. Constat chiffre
+2. So what (implication business)
+3. Lien methode
+4. Limites/portee
+
+Objectif: interpretation rigoureuse, objective, traçable.
 
 ## Structure
 - `src/config_loader.py`: validation YAML + resolution code ENTSO-E variable dans le temps
@@ -32,11 +51,12 @@ Consequence: le pompage est traite explicitement comme composante de flex et ne 
 - `src/metrics.py`: metriques annuelles v3
 - `src/scenario_engine.py`: recalcul complet sous perturbations scenario
 - `src/phase_diagnostics.py`: classification stage_1..stage_4|unknown
+- `src/state_adapter.py`: contrat de schema UI + mapping legacy/v3
 
-## Limits
+## Limites
 - Prix scenario: `price_synth` indicatif (affine par regimes, ancre TCA), pas prevision spot reelle.
 - BESS simplifie (SoC deterministe, sans optimisation economique).
-- CohÃ©rence regime/prix est un score de validation, pas une preuve causale.
+- Cohérence regime/prix = score de validation, pas preuve causale.
 
 ## Run
 ```bash
@@ -48,4 +68,5 @@ streamlit run app.py
 ```bash
 python -m pytest -q
 $env:PYTHONWARNINGS='error::RuntimeWarning'; python -m pytest -q
+python -m compileall -q app.py src pages tests
 ```

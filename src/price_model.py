@@ -76,7 +76,23 @@ def compute_tca(
     """Calcule la Thermal Cost Anchor horaire."""
 
     scenario_overrides = scenario_overrides or {}
+
+    def _ov(key: str, default: float) -> float:
+        val = scenario_overrides.get(key, default)
+        try:
+            return float(val)
+        except Exception:
+            return float(default)
+
     tech = str(country_cfg["thermal"]["marginal_tech"]).lower()
+
+    eta_ccgt = _ov("eta_ccgt", ETA_CCGT)
+    eta_coal = _ov("eta_coal", ETA_COAL)
+    ef_gas = _ov("ef_gas", EF_GAS)
+    ef_coal = _ov("ef_coal", EF_COAL)
+    vom_ccgt = _ov("vom_ccgt", VOM_CCGT)
+    vom_coal = _ov("vom_coal", VOM_COAL)
+    coal_gas_ratio = _ov("coal_gas_index_ratio", COAL_GAS_INDEX_RATIO)
 
     gas_h = _build_hourly_from_daily(
         base_index=df.index,
@@ -92,11 +108,11 @@ def compute_tca(
     )
 
     if tech == "ccgt":
-        tca = gas_h / ETA_CCGT + (EF_GAS / ETA_CCGT) * co2_h + VOM_CCGT
+        tca = gas_h / eta_ccgt + (ef_gas / eta_ccgt) * co2_h + vom_ccgt
     elif tech == "coal":
         coal_daily = commodities.get("coal_daily") if commodities else None
         if coal_daily is None:
-            coal_h = gas_h * COAL_GAS_INDEX_RATIO
+            coal_h = gas_h * coal_gas_ratio
         else:
             coal_h = _build_hourly_from_daily(
                 base_index=df.index,
@@ -104,7 +120,7 @@ def compute_tca(
                 override_constant=None,
                 label="coal_daily",
             )
-        tca = coal_h / ETA_COAL + (EF_COAL / ETA_COAL) * co2_h + VOM_COAL
+        tca = coal_h / eta_coal + (ef_coal / eta_coal) * co2_h + vom_coal
     else:
         raise NotImplementedError(
             f"Spec ambigue : thermal.marginal_tech non supporte ({country_cfg['thermal']['marginal_tech']})"

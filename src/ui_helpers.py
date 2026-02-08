@@ -1,28 +1,108 @@
-﻿"""Shared Streamlit UI helpers."""
+"""Shared Streamlit UI helpers (visual system + narrative components)."""
 
 from __future__ import annotations
 
 import streamlit as st
 
+from src.state_adapter import normalize_metrics_record, normalize_state_metrics as _normalize_state_metrics
+
 
 GLOBAL_CSS = """
 <style>
-.block-container { padding-top: 1.2rem; padding-bottom: 1.2rem; }
-.small-note { color: #4b5563; font-size: 0.9rem; }
-.commentary-box {
-  background: #f8fafc;
-  border-left: 4px solid #0f766e;
-  padding: 0.7rem 0.9rem;
-  margin: 0.4rem 0 1rem 0;
-  border-radius: 6px;
-}
-.guard-box {
-  border: 1px dashed #94a3b8;
-  border-radius: 8px;
-  padding: 1rem;
-  color: #334155;
-  background: #f8fafc;
-}
+    h1 { font-size: 1.85rem !important; font-weight: 700 !important; color: #1b2a4a !important; }
+    h2 { font-size: 1.35rem !important; font-weight: 650 !important; color: #1b2a4a !important; }
+    h3 { font-size: 1.15rem !important; font-weight: 650 !important; color: #2c3e6b !important; }
+
+    .block-container { padding-top: 1.8rem; padding-bottom: 1.8rem; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+
+    [data-testid="stMetric"] {
+        background: #f0f4fa;
+        border-radius: 10px;
+        padding: 12px 16px;
+        border-left: 4px solid #0066cc;
+    }
+
+    .info-card {
+        background: #f0f4fa;
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+        border: 1px solid #d6e4f0;
+    }
+    .info-card h4 { margin-top: 0; color: #0066cc; font-size: 0.95rem; }
+    .info-card p { margin-bottom: 0.2rem; color: #3a4a6b; font-size: 0.88rem; }
+
+    .narrative-box {
+        background: #ebf5fb;
+        border-left: 4px solid #0066cc;
+        border-radius: 0 8px 8px 0;
+        padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0;
+        font-size: 0.9rem;
+        color: #2c3e50;
+        line-height: 1.5;
+    }
+
+    .commentary-box {
+        background: #f8fafc;
+        border-left: 4px solid #0f766e;
+        border-radius: 0 8px 8px 0;
+        padding: 0.8rem 1rem;
+        margin: 0.4rem 0 1rem 0;
+        color: #1f2937;
+        line-height: 1.45;
+    }
+
+    .guard-message {
+        text-align: center;
+        padding: 2.6rem 2rem;
+        background: #f8f9fb;
+        border-radius: 12px;
+        border: 2px dashed #cbd5e1;
+    }
+    .guard-message h3 { color: #64748b; font-weight: 560; }
+    .guard-message p { color: #94a3b8; }
+
+    .question-banner {
+        background: #0066cc;
+        color: white;
+        padding: 0.8rem 1.2rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        font-size: 1.05rem;
+        font-weight: 620;
+    }
+
+    .dynamic-narrative-info {
+        background: #ebf5fb; border-left: 4px solid #0066cc;
+        border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #2c3e50; line-height: 1.5;
+    }
+    .dynamic-narrative-warning {
+        background: #fff3e0; border-left: 4px solid #e65100;
+        border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #3e2723; line-height: 1.5;
+    }
+    .dynamic-narrative-alert {
+        background: #ffebee; border-left: 4px solid #c62828;
+        border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #3e2723; line-height: 1.5;
+    }
+    .dynamic-narrative-success {
+        background: #e8f5e9; border-left: 4px solid #2e7d32;
+        border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #1b5e20; line-height: 1.5;
+    }
+
+    .challenge-block {
+        background: #fff3e0; border-left: 4px solid #e65100;
+        border-radius: 0 8px 8px 0; padding: 0.8rem 1rem;
+        margin: 0.5rem 0 1rem 0; font-size: 0.9rem; color: #3e2723; line-height: 1.5;
+    }
+    .challenge-block strong { color: #e65100; }
+
+    [data-testid="stDataFrame"] { font-size: 0.86rem; }
 </style>
 """
 
@@ -31,51 +111,82 @@ def inject_global_css() -> None:
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 
-def guard_no_data(page_name: str) -> None:
+def guard_no_data(page_name: str = "cette page") -> None:
     st.markdown(
-        f"<div class='guard-box'><strong>Donnees non chargees.</strong><br>"
-        f"Chargez les donnees depuis la page d'accueil pour utiliser {page_name}.</div>",
+        f"""
+        <div class="guard-message">
+            <h3>Donnees non chargees</h3>
+            <p>Pour utiliser {page_name}, revenez sur la page d'accueil,
+            selectionnez vos pays/annees puis cliquez <strong>Charger donnees</strong>.</p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
     st.stop()
 
 
-def render_commentary(md_text: str) -> None:
-    st.markdown(f"<div class='commentary-box'>{md_text}</div>", unsafe_allow_html=True)
-
-
-def section(title: str, subtitle: str | None = None) -> None:
-    st.subheader(title)
+def section_header(title: str, subtitle: str = "") -> None:
+    st.markdown(f"### {title}")
     if subtitle:
         st.caption(subtitle)
 
 
-def normalize_metric_record(m: dict) -> dict:
-    out = dict(m)
-    if "h_negative_obs" not in out and "h_negative" in out:
-        out["h_negative_obs"] = out["h_negative"]
-    if "h_below_5_obs" not in out and "h_below_5" in out:
-        out["h_below_5_obs"] = out["h_below_5"]
-    if "h_regime_d" not in out and "h_regime_d_tail" in out:
-        out["h_regime_d"] = out["h_regime_d_tail"]
-    if "far" not in out and "far_structural" in out:
-        out["far"] = out["far_structural"]
-    if "pv_penetration_pct_gen" not in out and "pv_share" in out:
-        out["pv_penetration_pct_gen"] = float(out["pv_share"]) * 100.0
-    if "wind_penetration_pct_gen" not in out and "wind_share" in out:
-        out["wind_penetration_pct_gen"] = float(out["wind_share"]) * 100.0
-    if "vre_penetration_pct_gen" not in out and "vre_share" in out:
-        out["vre_penetration_pct_gen"] = float(out["vre_share"]) * 100.0
-    return out
+def section(title: str, subtitle: str | None = None) -> None:
+    section_header(title, subtitle or "")
+
+
+def info_card(title: str, body: str) -> None:
+    st.markdown(
+        f"""<div class="info-card">
+        <h4>{title}</h4>
+        <p>{body}</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def narrative(text: str) -> None:
+    st.markdown(f'<div class="narrative-box">{text}</div>', unsafe_allow_html=True)
+
+
+def render_commentary(md_text: str) -> None:
+    st.markdown(f'<div class="commentary-box">{md_text}</div>', unsafe_allow_html=True)
+
+
+def question_banner(text: str) -> None:
+    st.markdown(f'<div class="question-banner">{text}</div>', unsafe_allow_html=True)
+
+
+def dynamic_narrative(text: str, severity: str = "info") -> None:
+    css_class = f"dynamic-narrative-{severity}"
+    st.markdown(f'<div class="{css_class}">{text}</div>', unsafe_allow_html=True)
+
+
+def challenge_block(title: str, body: str) -> None:
+    st.markdown(
+        f"""<div class="challenge-block">
+        <strong>{title}</strong><br>
+        <span>{body}</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 
 def normalize_state_metrics(state: dict | None) -> None:
-    if not state or "metrics" not in state or not isinstance(state["metrics"], dict):
-        return
-    normalized = {}
-    for key, val in state["metrics"].items():
-        if isinstance(val, dict):
-            normalized[key] = normalize_metric_record(val)
-        else:
-            normalized[key] = val
-    state["metrics"] = normalized
+    _normalize_state_metrics(state)
+
+
+__all__ = [
+    "inject_global_css",
+    "guard_no_data",
+    "section_header",
+    "section",
+    "info_card",
+    "narrative",
+    "render_commentary",
+    "question_banner",
+    "dynamic_narrative",
+    "challenge_block",
+    "normalize_metrics_record",
+    "normalize_state_metrics",
+]
