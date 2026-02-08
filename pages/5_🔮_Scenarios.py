@@ -61,22 +61,90 @@ with right:
     info_card("Lecture", "Chercher d'abord delta FAR, delta h_regime_a, puis delta capture_ratio_pv.")
 
 with st.expander("Ajustements manuels", expanded=True):
-    delta_pv_gw = st.slider("delta_pv_gw", -10.0, 40.0, float(base_params.get("delta_pv_gw", 0.0)), 0.5)
+    delta_pv_gw = st.slider(
+        "delta_pv_gw",
+        -10.0,
+        40.0,
+        float(base_params.get("delta_pv_gw", 0.0)),
+        0.5,
+        help="Variation de capacité PV installée par rapport à la baseline (en GW).",
+    )
     delta_wind_onshore_gw = st.slider(
-        "delta_wind_onshore_gw", -10.0, 40.0, float(base_params.get("delta_wind_onshore_gw", 0.0)), 0.5
+        "delta_wind_onshore_gw",
+        -10.0,
+        40.0,
+        float(base_params.get("delta_wind_onshore_gw", 0.0)),
+        0.5,
+        help="Variation de capacité éolienne onshore installée par rapport à la baseline (en GW).",
     )
     delta_bess_power_gw = st.slider(
-        "delta_bess_power_gw", 0.0, 25.0, float(base_params.get("delta_bess_power_gw", 0.0)), 0.5
+        "delta_bess_power_gw",
+        0.0,
+        25.0,
+        float(base_params.get("delta_bess_power_gw", 0.0)),
+        0.5,
+        help="Ajout de puissance batterie (GW): limite de charge/décharge instantanée.",
     )
     delta_bess_energy_gwh = st.slider(
-        "delta_bess_energy_gwh", 0.0, 120.0, float(base_params.get("delta_bess_energy_gwh", 0.0)), 1.0
+        "delta_bess_energy_gwh",
+        0.0,
+        120.0,
+        float(base_params.get("delta_bess_energy_gwh", 0.0)),
+        1.0,
+        help="Ajout de capacité d'énergie batterie (GWh): volume stockable total.",
     )
-    delta_demand_pct = st.slider("delta_demand_pct", -20.0, 30.0, float(base_params.get("delta_demand_pct", 0.0)), 1.0)
+    delta_demand_pct = st.slider(
+        "delta_demand_pct",
+        -20.0,
+        30.0,
+        float(base_params.get("delta_demand_pct", 0.0)),
+        1.0,
+        help="Variation proportionnelle de toute la courbe de charge annuelle (en %).",
+    )
     delta_demand_midday_gw = st.slider(
-        "delta_demand_midday_gw", 0.0, 20.0, float(base_params.get("delta_demand_midday_gw", 0.0)), 0.5
+        "delta_demand_midday_gw",
+        0.0,
+        20.0,
+        float(base_params.get("delta_demand_midday_gw", 0.0)),
+        0.5,
+        help="Ajout absolu de charge locale sur les heures 11h-15h (heure locale), en GW.",
     )
-    gas_price_eur_mwh = st.slider("gas_price_eur_mwh", 10.0, 90.0, float(base_params.get("gas_price_eur_mwh", 35.0)), 1.0)
-    co2_price_eur_t = st.slider("co2_price_eur_t", 20.0, 200.0, float(base_params.get("co2_price_eur_t", 80.0)), 1.0)
+    gas_price_eur_mwh = st.slider(
+        "gas_price_eur_mwh",
+        10.0,
+        90.0,
+        float(base_params.get("gas_price_eur_mwh", 35.0)),
+        1.0,
+        help="Override du prix gaz TTF (EUR/MWh_th), constant sur toute l'année de scénario.",
+    )
+    co2_price_eur_t = st.slider(
+        "co2_price_eur_t",
+        20.0,
+        200.0,
+        float(base_params.get("co2_price_eur_t", 80.0)),
+        1.0,
+        help="Override du prix CO2 EUA (EUR/tCO2), constant sur toute l'année de scénario.",
+    )
+
+st.markdown("#### Ce que signifie chaque curseur")
+st.markdown(
+    f"""
+- `delta_pv_gw = {delta_pv_gw:+.1f}`: la capacité PV installée est augmentée/réduite de **{abs(delta_pv_gw):.1f} GW** vs baseline.
+  Le profil horaire PV est **redimensionné** (même forme, amplitude modifiée).  
+  Exemple: passer de `0` à `+27` signifie **+27 GW de capacité PV**.
+- `delta_wind_onshore_gw = {delta_wind_onshore_gw:+.1f}`: même logique pour l'éolien onshore (capacité installée).
+- `delta_bess_power_gw = {delta_bess_power_gw:+.1f}`: ajoute de la **puissance** batterie (vitesse max de charge/décharge).
+- `delta_bess_energy_gwh = {delta_bess_energy_gwh:+.1f}`: ajoute de la **capacité d'énergie** batterie (stock total disponible).
+- `delta_demand_pct = {delta_demand_pct:+.1f}%`: multiplie toute la demande horaire par `(1 + delta/100)`.
+- `delta_demand_midday_gw = {delta_demand_midday_gw:+.1f}`: ajoute un bloc de charge sur 11h-15h (heure locale), en GW.
+- `gas_price_eur_mwh = {gas_price_eur_mwh:.1f}`: force un prix gaz constant pour le calcul TCA/prix synth.
+- `co2_price_eur_t = {co2_price_eur_t:.1f}`: force un prix CO2 constant pour le calcul TCA/prix synth.
+"""
+)
+st.caption(
+    "Tous les deltas sont appliqués par rapport à la baseline sélectionnée (pays/année), "
+    "puis le pipeline est recalculé en entier."
+)
 
 params = {
     "delta_pv_gw": delta_pv_gw,
