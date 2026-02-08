@@ -1,55 +1,58 @@
+﻿"""Slope analysis utilities."""
+
+from __future__ import annotations
+
 import numpy as np
-from scipy import stats
-import logging
-
-logger = logging.getLogger("capture_prices.slope_analysis")
+from scipy.stats import linregress
 
 
-def compute_slope(metrics_list: list[dict], x_key: str, y_key: str,
-                  exclude_outliers: bool = True) -> dict:
-    """
-    Regression lineaire entre deux metriques sur la serie temporelle.
+def compute_slope(
+    metrics_list: list[dict],
+    x_key: str,
+    y_key: str,
+    exclude_outliers: bool = True,
+) -> dict:
+    """Linear slope between annual metrics (scipy linregress)."""
 
-    Args:
-        metrics_list: liste de dicts (un par annee)
-        x_key: cle de la metrique X (ex: 'pv_share')
-        y_key: cle de la metrique Y (ex: 'capture_ratio_pv')
-        exclude_outliers: exclure les annees dans OUTLIER_YEARS
+    x_vals = []
+    y_vals = []
 
-    Returns:
-        dict avec slope, intercept, r_squared, p_value, n_points, x_values, y_values
-    """
-    # Filtrer les points valides
-    points = []
     for m in metrics_list:
-        x_val = m.get(x_key)
-        y_val = m.get(y_key)
-        if x_val is None or y_val is None:
+        if exclude_outliers and bool(m.get("is_outlier", False)):
             continue
-        if np.isnan(x_val) or np.isnan(y_val):
+        x = m.get(x_key)
+        y = m.get(y_key)
+        if x is None or y is None:
             continue
-        if exclude_outliers and m.get('is_outlier', False):
+        try:
+            x = float(x)
+            y = float(y)
+        except Exception:
             continue
-        points.append((float(x_val), float(y_val)))
+        if not np.isfinite(x) or not np.isfinite(y):
+            continue
+        x_vals.append(x)
+        y_vals.append(y)
 
-    if len(points) < 3:
+    n = len(x_vals)
+    if n < 3:
         return {
-            'slope': np.nan, 'intercept': np.nan, 'r_squared': np.nan,
-            'p_value': np.nan, 'n_points': len(points),
-            'x_values': [], 'y_values': [],
+            "slope": float("nan"),
+            "intercept": float("nan"),
+            "r_squared": float("nan"),
+            "p_value": float("nan"),
+            "n_points": n,
+            "x_values": x_vals,
+            "y_values": y_vals,
         }
 
-    x = np.array([p[0] for p in points])
-    y = np.array([p[1] for p in points])
-
-    result = stats.linregress(x, y)
-
+    res = linregress(x_vals, y_vals)
     return {
-        'slope': round(float(result.slope), 6),
-        'intercept': round(float(result.intercept), 4),
-        'r_squared': round(float(result.rvalue ** 2), 4),
-        'p_value': round(float(result.pvalue), 6),
-        'n_points': len(points),
-        'x_values': x.tolist(),
-        'y_values': y.tolist(),
+        "slope": float(res.slope),
+        "intercept": float(res.intercept),
+        "r_squared": float(res.rvalue**2),
+        "p_value": float(res.pvalue),
+        "n_points": n,
+        "x_values": list(x_vals),
+        "y_values": list(y_vals),
     }

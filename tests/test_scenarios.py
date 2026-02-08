@@ -1,33 +1,68 @@
-import numpy as np
-import pandas as pd
+﻿from __future__ import annotations
+
+from src.metrics import compute_annual_metrics
 from src.nrl_engine import compute_nrl
 from src.scenario_engine import apply_scenario
-from src.constants import *
 
 
-def test_adding_bess_reduces_regime_a(make_raw_df, fr_config):
-    """Ajouter du BESS reduit les heures de Regime A"""
-    df = make_raw_df(n=48, load=30000, solar=20000, wind_on=15000, nuclear=30000)
-    baseline = compute_nrl(df, fr_config, 'FR', 2024)
-    h_a_baseline = (baseline[COL_REGIME] == 'A').sum()
+def test_scenario_plus_bess_increases_far_and_reduces_h_regime_a(
+    make_raw_df, fr_cfg, thresholds_cfg, commodities_cfg
+):
+    df = make_raw_df(n=168, load=32000, solar=17000, wind_on=12000, nuclear=22000)
+    base = compute_nrl(
+        df_raw=df,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        must_run_mode="floor",
+        flex_model_mode="capacity",
+        price_mode="synthetic",
+    )
+    m_base = compute_annual_metrics(base, "FR", 2024, fr_cfg)
 
-    scenario = apply_scenario(baseline, {'delta_bess_power_gw': 20, 'delta_bess_energy_gwh': 80},
-                              fr_config, 'FR', 2024)
-    h_a_scenario = (scenario[COL_REGIME] == 'A').sum()
+    scen = apply_scenario(
+        df_base_processed=base,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        scenario_params={"delta_bess_power_gw": 8, "delta_bess_energy_gwh": 32},
+        price_mode="synthetic",
+    )
+    m_s = compute_annual_metrics(scen, "FR", 2024, fr_cfg)
 
-    assert h_a_scenario <= h_a_baseline
+    assert m_s["far"] >= m_base["far"]
+    assert m_s["h_regime_a"] <= m_base["h_regime_a"]
 
 
-def test_gas_co2_scenario_changes_tca(make_raw_df, fr_config):
-    """Les scenarios CO2/gaz modifient le TCA et le prix mecaniste"""
-    # n=200 pour que le rolling P75 (min_periods=168) fonctionne dans le TCA fallback
-    df = make_raw_df(n=200, load=50000, solar=5000, wind_on=3000, nuclear=30000)
-    baseline = compute_nrl(df, fr_config, 'FR', 2024)
-    baseline_tca = baseline[COL_TCA].median()
+def test_scenario_co2_gas_increases_ttl_synth(make_raw_df, fr_cfg, thresholds_cfg, commodities_cfg):
+    df = make_raw_df(n=168)
+    base = compute_nrl(
+        df_raw=df,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        must_run_mode="floor",
+        flex_model_mode="capacity",
+        price_mode="synthetic",
+    )
+    m_base = compute_annual_metrics(base, "FR", 2024, fr_cfg)
 
-    scenario = apply_scenario(baseline, {'gas_price_eur_mwh': 60, 'co2_price_eur_t': 150},
-                              fr_config, 'FR', 2024)
-    scenario_tca = scenario[COL_TCA].median()
+    high = apply_scenario(
+        df_base_processed=base,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        scenario_params={"gas_price_eur_mwh": 70, "co2_price_eur_t": 160},
+        price_mode="synthetic",
+    )
+    m_high = compute_annual_metrics(high, "FR", 2024, fr_cfg)
 
-    assert scenario_tca > baseline_tca
-    assert scenario['price_mechanistic'].median() != baseline.get(COL_PRICE_DA, pd.Series([0])).median()
+    assert m_high["ttl"] >= m_base["ttl"]

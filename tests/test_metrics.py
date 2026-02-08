@@ -1,35 +1,72 @@
+﻿from __future__ import annotations
+
 import numpy as np
-from src.nrl_engine import compute_nrl
+
 from src.metrics import compute_annual_metrics
-from src.constants import *
+from src.nrl_engine import compute_nrl
 
 
-def test_capture_rate_formula(make_raw_df, fr_config):
-    """Capture rate = prix pondere par production"""
-    df = make_raw_df(n=3)
-    df[COL_PRICE_DA] = [10, 50, 80]
-    df[COL_SOLAR] = [100, 200, 0]
-    processed = compute_nrl(df, fr_config, 'FR', 2024)
-    metrics = compute_annual_metrics(processed, 2024, 'FR')
-    # capture = (10*100 + 50*200 + 80*0) / (100+200) = 11000/300 ~ 36.67
-    assert abs(metrics['capture_rate_pv'] - 36.67) < 0.1
+def test_metrics_penetration_definition_matches_generation_share(
+    make_raw_df, fr_cfg, thresholds_cfg, commodities_cfg
+):
+    df = make_raw_df(n=24, solar=10000, wind_on=5000, wind_off=2000, nuclear=20000, gas=3000, biomass=2000)
+    out = compute_nrl(
+        df_raw=df,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        price_mode="observed",
+    )
+    m = compute_annual_metrics(out, "FR", 2024, fr_cfg)
+
+    total_gen = (
+        df["solar_mw"]
+        + df["wind_onshore_mw"]
+        + df["wind_offshore_mw"]
+        + df["nuclear_mw"]
+        + df["coal_mw"]
+        + df["gas_mw"]
+        + df["lignite_mw"]
+        + df["hydro_ror_mw"]
+        + df["hydro_reservoir_mw"]
+        + df["biomass_mw"]
+        + df["other_mw"]
+    ).sum()
+    pv_expected = 100 * df["solar_mw"].sum() / total_gen
+    assert abs(m["pv_penetration_pct_gen"] - pv_expected) < 1e-6
 
 
-def test_far_no_surplus(make_raw_df, fr_config):
-    """FAR = NaN quand surplus = 0 partout"""
-    df = make_raw_df(load=80000, solar=5000, wind_on=2000, nuclear=30000)
-    # NRL = 80000 - 7000 - 34000 = 39000 > 0 -> pas de surplus
-    processed = compute_nrl(df, fr_config, 'FR', 2024)
-    metrics = compute_annual_metrics(processed, 2024, 'FR')
-    assert metrics['far_structural'] is None or np.isnan(metrics['far_structural'])
+def test_metrics_observables_use_observed_price_not_price_used(
+    make_raw_df, fr_cfg, thresholds_cfg, commodities_cfg
+):
+    df = make_raw_df(n=24, price_da=-5.0)
+    out = compute_nrl(
+        df_raw=df,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        price_mode="synthetic",
+    )
+    m = compute_annual_metrics(out, "FR", 2024, fr_cfg)
+
+    assert m["h_negative_obs"] == 24
+    assert np.isfinite(m["baseload_price_used"])
 
 
-def test_vre_share_is_of_generation(make_raw_df, fr_config):
-    """VRE share = % of total generation, PAS % of demand"""
-    df = make_raw_df(load=50000, solar=10000, wind_on=5000, nuclear=30000,
-                     gas=5000, hydro_ror=3000, biomass=1000)
-    # total_gen = 10000+5000+30000+5000+3000+1000 = 54000
-    # vre = 15000 -> vre_share = 15000/54000 ~ 0.2778
-    processed = compute_nrl(df, fr_config, 'FR', 2024)
-    metrics = compute_annual_metrics(processed, 2024, 'FR')
-    assert abs(metrics['vre_share'] - 15000/54000) < 0.01
+def test_far_nan_when_no_surplus(make_raw_df, fr_cfg, thresholds_cfg, commodities_cfg):
+    df = make_raw_df(n=24, load=90000, solar=1000, wind_on=1000, nuclear=10000)
+    out = compute_nrl(
+        df_raw=df,
+        country_key="FR",
+        year=2024,
+        country_cfg=fr_cfg,
+        thresholds=thresholds_cfg,
+        commodities=commodities_cfg,
+        price_mode="observed",
+    )
+    m = compute_annual_metrics(out, "FR", 2024, fr_cfg)
+    assert np.isnan(m["far"])

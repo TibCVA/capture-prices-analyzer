@@ -1,3 +1,16 @@
+﻿model_params:
+  regime_d:
+    method: "quantile"
+    positive_nrl_quantile: 0.90
+    absolute_nrl_mw: null
+
+coherence_params:
+  price_low_threshold: 5.0
+  b_price_min: -10.0
+  b_price_max_frac_tca_median: 0.50
+  c_price_min_frac_tca_median: 0.30
+  c_price_max_frac_tca_median: 2.00
+
 phase_thresholds:
 
   stage_1:
@@ -15,34 +28,27 @@ phase_thresholds:
     days_spread_50_min: 150
 
   stage_3:
-    vre_share_min: 0.20          # Minimum VRE pour qualifier en Stage 3
-    sr_min: 0.005                # Minimum surplus ratio — si quasi-nul, FAR est trivial
-    far_structural_min: 0.60
-    far_structural_strong: 0.80
+    far_min: 0.60
+    far_strong: 0.80
     require_h_neg_declining: true
 
   stage_4:
-    vre_share_min: 0.35          # Minimum VRE pour qualifier en Stage 4
-    far_structural_min: 0.90
+    far_min: 0.90
     h_regime_c_max: 1500
 
-  alerts:
-    approaching_stage_2:
-      h_negative_range: [150, 300]
-      capture_ratio_pv_range: [0.75, 0.85]
-      label: "⚠️ Approche Stage 2"
-      color: "#ff9800"
-    deep_stage_2:
-      h_negative_min: 500
-      capture_ratio_pv_max: 0.65
-      label: "🔴 Stage 2 sévère"
-      color: "#f44336"
-    high_inflexibility:
-      ir_min: 0.60
-      label: "🔴 IR élevé"
-      color: "#f44336"
-    low_flex:
-      far_structural_max: 0.30
-      sr_min: 0.02
-      label: "🔴 Flex insuffisante"
-      color: "#f44336"
+alerts:
+  approaching_stage_2:
+    h_negative_range: [150, 300]
+    capture_ratio_pv_range: [0.75, 0.85]
+    label: "⚠️ Approche Stage 2"
+  deep_stage_2:
+    h_negative_min: 500
+    capture_ratio_pv_max: 0.65
+    label: "🔴 Stage 2 severe"
+  high_inflexibility:
+    ir_min: 0.60
+    label: "🔴 IR eleve"
+  low_flex:
+    far_max: 0.30
+    sr_min: 0.02
+    label: "🔴 Flex insuffisante"

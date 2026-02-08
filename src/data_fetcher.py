@@ -1,213 +1,326 @@
-import os
+﻿"""ENTSO-E data fetcher with v3.0 harmonization and caching."""
+
+from __future__ import annotations
+
 import calendar
+import inspect
 import logging
+import os
 import time
-import pandas as pd
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
+from dotenv import dotenv_values
 from entsoe import EntsoePandasClient
-from src.constants import *
+
+from src.config_loader import resolve_entsoe_code
+from src.constants import (
+    COL_BIOMASS,
+    COL_COAL,
+    COL_GAS,
+    COL_HAS_GAP,
+    COL_HYDRO_RES,
+    COL_HYDRO_ROR,
+    COL_LIGNITE,
+    COL_LOAD,
+    COL_NET_POSITION,
+    COL_NUCLEAR,
+    COL_OTHER,
+    COL_PRICE_DA,
+    COL_PSH_GEN,
+    COL_PSH_PUMP,
+    COL_SOLAR,
+    COL_WIND_OFF,
+    COL_WIND_ON,
+    ENTSOE_GEN_ALIASES,
+    ENTSOE_GEN_MAPPING,
+    HOURS_LEAP,
+    HOURS_YEAR,
+    OPTIONAL_COLUMNS,
+)
+from src.time_utils import to_utc_index
 
 logger = logging.getLogger("capture_prices.data_fetcher")
 
+_RAW_DIR = Path("data/raw")
 
-def _api_call_with_retry(func, *args, retries=4, delay=15, **kwargs):
-    for attempt in range(retries):
+_GENERATION_COLS = [
+    COL_SOLAR,
+    COL_WIND_ON,
+    COL_WIND_OFF,
+    COL_NUCLEAR,
+    COL_LIGNITE,
+    COL_COAL,
+    COL_GAS,
+    COL_HYDRO_ROR,
+    COL_HYDRO_RES,
+    COL_PSH_GEN,
+    COL_PSH_PUMP,
+    COL_BIOMASS,
+    COL_OTHER,
+]
+
+
+class _MissingDataError(RuntimeError):
+    pass
+
+
+def _api_call_with_retry(func, *args, **kwargs):
+    delays = [5, 15, 30]
+    attempt = 0
+    while True:
         try:
             return func(*args, **kwargs)
-        except Exception as e:
-            logger.warning(f"API attempt {attempt+1}/{retries} failed: {e}")
-            if attempt < retries - 1:
-                time.sleep(delay * (attempt + 1))
-            else:
+        except Exception:
+            if attempt >= len(delays):
                 raise
+            wait_s = delays[attempt]
+            attempt += 1
+            logger.warning(
+                "ENTSO-E call failed (attempt %s/%s), retry in %ss",
+                attempt,
+                len(delays),
+                wait_s,
+            )
+            time.sleep(wait_s)
 
 
-def fetch_country_year(country_key: str, year: int,
-                       api_key: str, force: bool = False) -> pd.DataFrame:
-    """
-    Telecharge load, generation, prix, net position pour un pays/annee.
-    Retourne un DataFrame horaire en UTC avec colonnes harmonisees.
-    Stocke le resultat en Parquet dans data/raw/.
-    """
-    # Etape 1 — Cache check
-    cache_path = os.path.join("data", "raw", f"{country_key}_{year}.parquet")
-    if os.path.exists(cache_path) and not force:
-        logger.info(f"Cache hit: {cache_path}")
-        return pd.read_parquet(cache_path)
+def _resolve_api_key() -> str:
+    env_key = os.getenv("ENTSOE_API_KEY")
+    if env_key:
+        return env_key
+    dotenv_key = dotenv_values(".env").get("ENTSOE_API_KEY")
+    if dotenv_key:
+        return str(dotenv_key)
+    raise RuntimeError("ENTSOE_API_KEY manquante (env ou .env)")
 
-    # Etape 2 — Resolution du code ENTSO-E
-    entsoe_code = COUNTRY_ENTSOE[country_key]
-    if country_key in COUNTRY_CODE_PERIODS:
-        for period in COUNTRY_CODE_PERIODS[country_key]:
-            if period['start'] <= f"{year}-01-01" <= period['end']:
-                entsoe_code = period['code']
-                break
 
-    # Etape 3 — Bornes temporelles
-    start = pd.Timestamp(f"{year}-01-01", tz="UTC")
-    end = pd.Timestamp(f"{year+1}-01-01", tz="UTC")
-    client = EntsoePandasClient(api_key=api_key)
+def _extract_load_series(raw_load: pd.Series | pd.DataFrame) -> pd.Series:
+    if isinstance(raw_load, pd.Series):
+        s = raw_load.copy()
+        s.name = COL_LOAD
+        return s
 
-    # Etape 4a — Load
-    raw_load = _api_call_with_retry(client.query_load, entsoe_code, start=start, end=end)
     if isinstance(raw_load, pd.DataFrame):
-        load_series = raw_load['Actual Load'] if 'Actual Load' in raw_load.columns else raw_load.iloc[:, 0]
-    else:
-        load_series = raw_load
+        candidates = [c for c in raw_load.columns if "Actual Load" in str(c)]
+        if not candidates:
+            raise NotImplementedError(
+                "Spec ambigue : format load ENTSO-E inattendu (section G.3 Etape 3A)"
+            )
+        s = raw_load[candidates[0]].copy()
+        s.name = COL_LOAD
+        return s
 
-    # Etape 4b — Generation par type
-    raw_gen = _api_call_with_retry(client.query_generation, entsoe_code, start=start, end=end, psr_type=None)
+    raise NotImplementedError("Spec ambigue : type load ENTSO-E non supporte (section G.3 Etape 3A)")
 
-    gen_dict = {}
+
+def _normalize_gen_label(label: str) -> str:
+    if label in ENTSOE_GEN_ALIASES:
+        return ENTSOE_GEN_ALIASES[label]
+    return label
+
+
+def _extract_generation_columns(raw_gen: pd.DataFrame) -> dict[str, pd.Series]:
+    out: dict[str, pd.Series] = {}
+
+    def _accumulate(key: str, values: pd.Series) -> None:
+        if key not in out:
+            out[key] = values.astype(float)
+        else:
+            out[key] = out[key].add(values.astype(float), fill_value=0.0)
 
     if isinstance(raw_gen.columns, pd.MultiIndex):
-        for gen_type, col_type in raw_gen.columns:
-            target_col = ENTSOE_GEN_MAPPING.get(gen_type)
-            if target_col is None:
+        for gen_type, flow_type in raw_gen.columns:
+            gen_type = _normalize_gen_label(str(gen_type))
+            mapped = ENTSOE_GEN_MAPPING.get(gen_type)
+            if mapped is None:
+                logger.warning("Generation type ignore (non mappe): %s", gen_type)
                 continue
 
-            if gen_type == "Hydro Pumped Storage":
-                if col_type == "Actual Aggregated":
-                    gen_dict[COL_PSH_GEN] = raw_gen[(gen_type, col_type)].abs()
-                elif col_type == "Actual Consumption":
-                    gen_dict[COL_PSH_PUMP] = raw_gen[(gen_type, col_type)].abs()
-            else:
-                if col_type == "Actual Aggregated":
-                    if target_col in gen_dict:
-                        gen_dict[target_col] = gen_dict[target_col] + raw_gen[(gen_type, col_type)].fillna(0)
-                    else:
-                        gen_dict[target_col] = raw_gen[(gen_type, col_type)]
+            series = raw_gen[(gen_type, flow_type)]
+            flow_type = str(flow_type)
+
+            if mapped == "_psh_dispatch":
+                if "Actual Aggregated" in flow_type:
+                    _accumulate(COL_PSH_GEN, series.abs())
+                elif "Actual Consumption" in flow_type:
+                    _accumulate(COL_PSH_PUMP, series.abs())
+                continue
+
+            if "Actual Aggregated" in flow_type:
+                _accumulate(mapped, series)
     else:
         for col in raw_gen.columns:
-            target_col = ENTSOE_GEN_MAPPING.get(col)
-            if target_col:
-                if target_col in gen_dict:
-                    gen_dict[target_col] = gen_dict[target_col] + raw_gen[col].fillna(0)
+            col_s = str(col)
+            mapped = ENTSOE_GEN_MAPPING.get(_normalize_gen_label(col_s))
+            if mapped is None:
+                logger.warning("Generation type ignore (non mappe): %s", col_s)
+                continue
+            if mapped == "_psh_dispatch":
+                if "Consumption" in col_s:
+                    _accumulate(COL_PSH_PUMP, raw_gen[col].abs())
                 else:
-                    gen_dict[target_col] = raw_gen[col]
+                    _accumulate(COL_PSH_GEN, raw_gen[col].abs())
+            else:
+                _accumulate(mapped, raw_gen[col])
 
-    # Etape 4c — Prix Day-Ahead
-    raw_price = _api_call_with_retry(client.query_day_ahead_prices, entsoe_code, start=start, end=end)
-    if hasattr(raw_price.index, 'freq') and raw_price.index.freq is not None:
-        freq_min = raw_price.index.freq.n if hasattr(raw_price.index.freq, 'n') else 60
-    else:
-        diffs = raw_price.index.to_series().diff().dt.total_seconds().dropna()
-        freq_min = int(diffs.median() / 60)
-        logger.info(f"Prix DA: resolution inferee = {freq_min} min")
+    return out
 
-    price_series = raw_price
 
-    # Etape 4d — Net Position (cross-border)
+def _is_local_auction_issue(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "local auction" in msg or "query_day_ahead_prices_local" in msg
+
+
+def _fetch_prices(client: EntsoePandasClient, entsoe_code: str, start, end) -> pd.Series:
     try:
-        raw_net_pos = _api_call_with_retry(
-            client.query_net_position, entsoe_code, start=start, end=end, dayahead=True
-        )
-        net_position = raw_net_pos
-        logger.info(f"Net position chargee via API pour {country_key}/{year}")
-    except Exception as e:
-        logger.warning(f"query_net_position failed for {country_key}/{year}: {e}. "
-                       f"Fallback: net_position = NaN (flex export non disponible).")
-        net_position = None
+        prices = _api_call_with_retry(client.query_day_ahead_prices, entsoe_code, start=start, end=end)
+        if prices is None or len(prices) == 0:
+            raise _MissingDataError("query_day_ahead_prices vide")
+        return prices.rename(COL_PRICE_DA)
+    except Exception as exc:
+        if isinstance(exc, _MissingDataError) or _is_local_auction_issue(exc):
+            if hasattr(client, "query_day_ahead_prices_local"):
+                prices = _api_call_with_retry(
+                    client.query_day_ahead_prices_local, entsoe_code, start=start, end=end
+                )
+                if prices is None or len(prices) == 0:
+                    raise _MissingDataError("query_day_ahead_prices_local vide")
+                return prices.rename(COL_PRICE_DA)
+            raise NotImplementedError(
+                "Prix DA local auction non supporte par la version entsoe-py installee"
+            ) from exc
+        raise
 
-    # Etape 5 — Assemblage et harmonisation
-    df = pd.DataFrame(gen_dict)
 
-    df[COL_LOAD] = load_series
-    df[COL_PRICE_DA] = price_series
+def _fetch_net_position(client: EntsoePandasClient, entsoe_code: str, start, end) -> pd.Series | None:
+    try:
+        sig = inspect.signature(client.query_net_position)
+        if "dayahead" in sig.parameters:
+            series = _api_call_with_retry(
+                client.query_net_position,
+                entsoe_code,
+                start=start,
+                end=end,
+                dayahead=True,
+            )
+        else:
+            series = _api_call_with_retry(client.query_net_position, entsoe_code, start=start, end=end)
+        if series is None or len(series) == 0:
+            return None
+        return series.rename(COL_NET_POSITION)
+    except Exception as exc:  # graceful fallback per spec
+        logger.warning("Net position indisponible (%s): %s", entsoe_code, exc)
+        return None
+
+
+def fetch_country_year(
+    country_key: str,
+    year: int,
+    countries_cfg: dict,
+    force: bool = False,
+) -> pd.DataFrame:
+    """Recupere et harmonise les donnees ENTSO-E pour un pays/annee."""
+
+    cache_path = _RAW_DIR / f"{country_key}_{year}.parquet"
+    if cache_path.exists() and not force:
+        return pd.read_parquet(cache_path)
+
+    if country_key not in countries_cfg:
+        raise KeyError(f"Pays inconnu: {country_key}")
+
+    country_cfg = countries_cfg[country_key]
+    country_tz = country_cfg["timezone"]
+    entsoe_code = resolve_entsoe_code(country_key, year, countries_cfg)
+
+    api_key = _resolve_api_key()
+    client = EntsoePandasClient(api_key=api_key)
+
+    start = pd.Timestamp(f"{year}0101", tz=country_tz)
+    end = pd.Timestamp(f"{year + 1}0101", tz=country_tz)
+
+    # A) Load
+    raw_load = _api_call_with_retry(client.query_load, entsoe_code, start=start, end=end)
+    load = _extract_load_series(raw_load)
+
+    # B) Generation
+    raw_gen = _api_call_with_retry(client.query_generation, entsoe_code, start=start, end=end, psr_type=None)
+    gen_cols = _extract_generation_columns(raw_gen)
+
+    # C) Prices
+    prices = _fetch_prices(client, entsoe_code, start, end)
+
+    # D) Net position
+    net_position = _fetch_net_position(client, entsoe_code, start, end)
+
+    # Assemble union index
+    series_list = [load, prices, *gen_cols.values()]
     if net_position is not None:
-        df[COL_NET_POSITION] = net_position
+        series_list.append(net_position)
 
-    # Convertir en UTC
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-    else:
-        df.index = df.index.tz_convert("UTC")
+    idx = None
+    for s in series_list:
+        idx = s.index if idx is None else idx.union(s.index)
+    if idx is None:
+        raise RuntimeError(f"Aucune serie recuperee pour {country_key}/{year}")
 
-    # Resample hourly
-    price_col = df[COL_PRICE_DA].copy() if COL_PRICE_DA in df.columns else None
-    cols_no_price = [c for c in df.columns if c != COL_PRICE_DA]
-    df_resampled = df[cols_no_price].resample('h').mean()
+    df = pd.DataFrame(index=idx)
+    df[COL_LOAD] = load.reindex(idx)
+    for col, s in gen_cols.items():
+        df[col] = s.reindex(idx)
+    df[COL_PRICE_DA] = prices.reindex(idx)
+    if net_position is not None:
+        df[COL_NET_POSITION] = net_position.reindex(idx)
 
-    if price_col is not None:
-        df_resampled[COL_PRICE_DA] = price_col.resample('h').mean()
+    # Missing optionals
+    for col in OPTIONAL_COLUMNS:
+        if col not in df.columns:
+            if col == COL_NET_POSITION:
+                df[col] = np.nan
+            else:
+                df[col] = 0.0
 
-    df = df_resampled
-
-    # Colonnes manquantes -> 0
-    # Inclure solar et wind_on car certains pays (PL, DK early years) n'ont pas de donnees
-    all_gen_optional = OPTIONAL_COLUMNS | {COL_SOLAR, COL_WIND_ON, COL_COAL, COL_GAS,
-                                            COL_HYDRO_ROR, COL_BIOMASS, COL_OTHER}
-    for col in all_gen_optional:
+    # Keep load/price as-is; fill other generation columns to 0 if absent
+    for col in _GENERATION_COLS:
         if col not in df.columns:
             df[col] = 0.0
 
-    if COL_NET_POSITION not in df.columns:
-        df[COL_NET_POSITION] = np.nan
+    # Normalize timezone + hourly
+    df.index = to_utc_index(pd.DatetimeIndex(df.index))
 
-    # Total generation
-    gen_cols = [COL_SOLAR, COL_WIND_ON, COL_WIND_OFF, COL_NUCLEAR, COL_LIGNITE,
-                COL_COAL, COL_GAS, COL_HYDRO_ROR, COL_HYDRO_RES, COL_PSH_GEN,
-                COL_BIOMASS, COL_OTHER]
-    df[COL_TOTAL_GEN] = df[[c for c in gen_cols if c in df.columns]].sum(axis=1)
+    physical_cols = [COL_LOAD, *_GENERATION_COLS]
+    physical_resampled = df[physical_cols].resample("h").mean()
+    price_resampled = df[[COL_PRICE_DA]].resample("h").mean()
+    net_resampled = df[[COL_NET_POSITION]].resample("h").mean()
 
-    # Interpolation des trous courts — SEULEMENT sur load et generation
-    # JAMAIS sur les prix
-    cols_to_interpolate = [c for c in df.columns if c != COL_PRICE_DA]
-    df[cols_to_interpolate] = df[cols_to_interpolate].interpolate(
-        method='linear', limit=3, limit_direction='forward'
-    )
+    df = physical_resampled.join(price_resampled, how="outer").join(net_resampled, how="left")
 
-    # Flag gaps
+    # Gaps management
+    df[physical_cols] = df[physical_cols].interpolate(limit=3)
     df[COL_HAS_GAP] = df[COL_LOAD].isna() | df[COL_PRICE_DA].isna()
 
-    # Etape 6 — Validation
-    expected = HOURS_LEAP if calendar.isleap(year) else HOURS_YEAR
-    n = len(df)
+    # Validations (warnings only)
+    if df[COL_LOAD].isna().all():
+        raise RuntimeError("Absence totale de load (spec I.1)")
 
-    if (df[COL_LOAD] < 0).any():
-        n_neg = (df[COL_LOAD] < 0).sum()
-        logger.warning(f"{country_key}/{year}: {n_neg} heures avec load negatif -> mis a NaN")
-        df.loc[df[COL_LOAD] < 0, COL_LOAD] = np.nan
+    n_neg_load = int((df[COL_LOAD] < 0).sum())
+    if n_neg_load > 0:
+        logger.warning("%s/%s: %s heures avec load < 0", country_key, year, n_neg_load)
 
-    if n < expected * 0.95:
-        logger.warning(f"{country_key}/{year}: {n}/{expected} heures seulement")
+    completeness_load = float(df[COL_LOAD].notna().mean())
+    completeness_price = float(df[COL_PRICE_DA].notna().mean())
+    if completeness_load < 0.90:
+        logger.warning("%s/%s: completude load %.1f%% < 90%%", country_key, year, 100 * completeness_load)
+    if completeness_price < 0.90:
+        logger.warning("%s/%s: completude prix %.1f%% < 90%%", country_key, year, 100 * completeness_price)
 
-    completeness_load = df[COL_LOAD].notna().mean()
-    completeness_price = df[COL_PRICE_DA].notna().mean()
-    logger.info(f"Fetched {country_key}/{year}: {n} rows, "
-                f"load={completeness_load:.1%}, price={completeness_price:.1%}")
+    expected_hours = HOURS_LEAP if calendar.isleap(year) else HOURS_YEAR
+    if len(df) < 0.95 * expected_hours:
+        logger.warning(
+            "%s/%s: %s heures (attendu %s)", country_key, year, len(df), expected_hours
+        )
 
-    # Etape 7 — Sauvegarde
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    _RAW_DIR.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache_path, index=True)
     return df
-
-
-def load_commodity_prices() -> dict:
-    """
-    Charge les prix gaz (TTF) et CO2 (EUA) depuis data/external/.
-    Retourne {'gas': pd.Series, 'co2': pd.Series, 'bess': pd.DataFrame}
-    Les Series ont un DatetimeIndex daily.
-    Les cles manquantes sont None.
-    """
-    result = {'gas': None, 'co2': None, 'bess': None}
-
-    gas_path = os.path.join("data", "external", "ttf_daily.csv")
-    if os.path.exists(gas_path):
-        gas_df = pd.read_csv(gas_path, parse_dates=['date'], index_col='date')
-        result['gas'] = gas_df['price_eur_mwh']
-    else:
-        logger.warning("ttf_daily.csv absent -- TCA sera approxime")
-
-    co2_path = os.path.join("data", "external", "eua_daily.csv")
-    if os.path.exists(co2_path):
-        co2_df = pd.read_csv(co2_path, parse_dates=['date'], index_col='date')
-        result['co2'] = co2_df['price_eur_t']
-    else:
-        logger.warning("eua_daily.csv absent -- TCA sera approxime")
-
-    bess_path = os.path.join("data", "external", "bess_capacity.csv")
-    if os.path.exists(bess_path):
-        result['bess'] = pd.read_csv(bess_path)
-
-    return result

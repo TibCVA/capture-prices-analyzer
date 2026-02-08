@@ -1,36 +1,32 @@
-# ========================================================================
-# COUNTRIES.YAML — Configuration par pays
-# ========================================================================
-#
-# DEUX MODES de calcul du must-run :
-#   "observed" -> MR(t) = somme des productions observees des filieres MR
-#   "floor"    -> MR(t) = min(observed_total, max(plancher_tech, observed x mod_pct))
-#                         ^ CONTRAINT a ne jamais depasser la production reelle
-#
-# En historique : utiliser "observed" (ancre sur la realite)
-# En scenario : utiliser "floor" (on modifie les planchers)
-# ========================================================================
-
-countries:
+﻿countries:
 
   FR:
     name: "France"
     entsoe_code: "FR"
     timezone: "Europe/Paris"
     color: "#003399"
+
     must_run:
       mode: "observed"
       observed_components: [nuclear, hydro_ror, biomass]
       floor_params:
         nuclear_floor_gw: 20.0
-        nuclear_modulation_pct: 0.50
+        nuclear_min_output_pct: 0.50
+        hydro_ror_floor_gw: 0.0
+        biomass_floor_gw: 0.0
+
     flex:
-      capacity:
-        psh_pump_capacity_gw: 4.5
-        bess_power_gw: 0.5
-        bess_energy_gwh: 2.0
-        dsm_gw: 2.0
+      model_mode: "observed"
+      historical_proxy:
+        use_psh_pumping: true
+        use_positive_net_position: true
+      capacity_defaults:
         export_max_gw: 17.0
+        psh_pump_gw: 4.5
+        dsm_gw: 2.0
+        bess_power_gw_default: 0.5
+        bess_energy_gwh_default: 2.0
+
     thermal:
       marginal_tech: "CCGT"
 
@@ -39,19 +35,28 @@ countries:
     entsoe_code: "DE_LU"
     timezone: "Europe/Berlin"
     color: "#FFCC00"
+
     must_run:
       mode: "observed"
       observed_components: [lignite, hydro_ror, biomass]
       floor_params:
         lignite_floor_gw: 5.0
-        lignite_modulation_pct: 0.40
+        lignite_min_output_pct: 0.40
+        hydro_ror_floor_gw: 0.0
+        biomass_floor_gw: 0.0
+
     flex:
-      capacity:
-        psh_pump_capacity_gw: 6.5
-        bess_power_gw: 3.0
-        bess_energy_gwh: 12.0
-        dsm_gw: 3.0
+      model_mode: "observed"
+      historical_proxy:
+        use_psh_pumping: true
+        use_positive_net_position: true
+      capacity_defaults:
         export_max_gw: 25.0
+        psh_pump_gw: 6.5
+        dsm_gw: 3.0
+        bess_power_gw_default: 3.0
+        bess_energy_gwh_default: 12.0
+
     thermal:
       marginal_tech: "CCGT"
 
@@ -60,19 +65,28 @@ countries:
     entsoe_code: "ES"
     timezone: "Europe/Madrid"
     color: "#CC0000"
+
     must_run:
       mode: "observed"
       observed_components: [nuclear, hydro_ror, biomass]
       floor_params:
         nuclear_floor_gw: 6.5
-        nuclear_modulation_pct: 0.90
+        nuclear_min_output_pct: 0.90
+        hydro_ror_floor_gw: 0.0
+        biomass_floor_gw: 0.0
+
     flex:
-      capacity:
-        psh_pump_capacity_gw: 3.0
-        bess_power_gw: 0.5
-        bess_energy_gwh: 2.0
-        dsm_gw: 1.5
+      model_mode: "observed"
+      historical_proxy:
+        use_psh_pumping: true
+        use_positive_net_position: true
+      capacity_defaults:
         export_max_gw: 5.0
+        psh_pump_gw: 3.0
+        dsm_gw: 1.5
+        bess_power_gw_default: 0.5
+        bess_energy_gwh_default: 2.0
+
     thermal:
       marginal_tech: "CCGT"
 
@@ -81,19 +95,28 @@ countries:
     entsoe_code: "PL"
     timezone: "Europe/Warsaw"
     color: "#DC143C"
+
     must_run:
       mode: "observed"
       observed_components: [coal, hydro_ror, biomass]
       floor_params:
         coal_floor_gw: 8.0
-        coal_modulation_pct: 0.50
+        coal_min_output_pct: 0.50
+        hydro_ror_floor_gw: 0.0
+        biomass_floor_gw: 0.0
+
     flex:
-      capacity:
-        psh_pump_capacity_gw: 1.5
-        bess_power_gw: 0.2
-        bess_energy_gwh: 0.8
-        dsm_gw: 1.0
+      model_mode: "observed"
+      historical_proxy:
+        use_psh_pumping: true
+        use_positive_net_position: true
+      capacity_defaults:
         export_max_gw: 8.0
+        psh_pump_gw: 1.5
+        dsm_gw: 1.0
+        bess_power_gw_default: 0.2
+        bess_energy_gwh_default: 0.8
+
     thermal:
       marginal_tech: "coal"
 
@@ -102,17 +125,34 @@ countries:
     entsoe_code: "DK_1"
     timezone: "Europe/Copenhagen"
     color: "#C8102E"
+
     must_run:
       mode: "observed"
       observed_components: [biomass]
       floor_params:
         biomass_floor_gw: 0.5
+        biomass_min_output_pct: 1.00
+
     flex:
-      capacity:
-        psh_pump_capacity_gw: 0.0
-        bess_power_gw: 0.3
-        bess_energy_gwh: 1.2
-        dsm_gw: 0.5
+      model_mode: "observed"
+      historical_proxy:
+        use_psh_pumping: false
+        use_positive_net_position: true
+      capacity_defaults:
         export_max_gw: 6.0
+        psh_pump_gw: 0.0
+        dsm_gw: 0.5
+        bess_power_gw_default: 0.3
+        bess_energy_gwh_default: 1.2
+
     thermal:
       marginal_tech: "CCGT"
+
+country_code_periods:
+  DE:
+    - code: "DE_AT_LU"
+      start: "2015-01-01"
+      end: "2018-09-30"
+    - code: "DE_LU"
+      start: "2018-10-01"
+      end: "2099-12-31"

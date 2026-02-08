@@ -1,93 +1,78 @@
-import os
+﻿"""Export helpers for Excel and Google Sheets."""
+
+from __future__ import annotations
+
 import logging
+import os
+from pathlib import Path
+
 import pandas as pd
-from openpyxl.styles import PatternFill, Font
-from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger("capture_prices.export_utils")
 
 
-def export_to_excel(all_metrics: list[dict],
-                    diagnostics: list[dict],
-                    slopes: list[dict],
-                    filepath: str):
-    """
-    Exporte les resultats en fichier Excel avec 3 onglets.
-    """
-    os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+def export_to_excel(
+    metrics_rows: list[dict],
+    diagnostics_rows: list[dict],
+    slopes_rows: list[dict],
+    filepath: str,
+) -> str:
+    """Export to xlsx under data/exports and return path."""
 
-    with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        # Onglet 1 : Metriques
-        df_metrics = pd.DataFrame(all_metrics)
-        df_metrics.to_excel(writer, sheet_name='Métriques', index=False)
+    out = Path(filepath)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-        # Onglet 2 : Diagnostics
-        df_diag = pd.DataFrame(diagnostics)
-        df_diag.to_excel(writer, sheet_name='Diagnostics', index=False)
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        pd.DataFrame(metrics_rows).to_excel(writer, sheet_name="metrics", index=False)
+        pd.DataFrame(diagnostics_rows).to_excel(writer, sheet_name="diagnostics", index=False)
+        pd.DataFrame(slopes_rows).to_excel(writer, sheet_name="slopes", index=False)
 
-        # Onglet 3 : Slopes
-        df_slopes = pd.DataFrame(slopes)
-        df_slopes.to_excel(writer, sheet_name='Slopes', index=False)
-
-        # Formatage conditionnel basique
-        wb = writer.book
-        ws = wb['Métriques']
-
-        # Header en gras
-        header_font = Font(bold=True)
-        for cell in ws[1]:
-            cell.font = header_font
-
-    logger.info(f"Export Excel: {filepath}")
+    logger.info("Export Excel genere: %s", out)
+    return str(out)
 
 
-def export_to_gsheets(all_metrics: list[dict],
-                      diagnostics: list[dict],
-                      slopes: list[dict],
-                      spreadsheet_name: str,
-                      creds_path: str | None = None) -> str | None:
-    """
-    Exporte vers Google Sheets. Retourne l'URL du Sheet.
-    Retourne None si les credentials sont absentes (graceful fail).
-    """
+def export_to_gsheets(
+    metrics_rows: list[dict],
+    diagnostics_rows: list[dict],
+    slopes_rows: list[dict],
+    spreadsheet_name: str,
+    creds_path: str | None = None,
+) -> str | None:
+    """Optional Google Sheets export, fail gracefully when creds are missing."""
+
     if creds_path is None:
-        creds_path = os.environ.get('GOOGLE_SHEETS_CREDS')
+        creds_path = os.getenv("GOOGLE_SHEETS_CREDS")
 
-    if not creds_path or not os.path.exists(creds_path):
-        logger.warning("Google Sheets creds absentes -- export non disponible")
+    if not creds_path or not Path(creds_path).exists():
+        logger.warning("Google Sheets creds absentes; export ignore")
         return None
 
     try:
         import gspread
         from google.oauth2.service_account import Credentials
 
-        scopes = ['https://www.googleapis.com/auth/spreadsheets',
-                   'https://www.googleapis.com/auth/drive']
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
         creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
         gc = gspread.authorize(creds)
-
         sh = gc.create(spreadsheet_name)
 
-        # Metriques
-        ws_metrics = sh.sheet1
-        ws_metrics.update_title('Métriques')
-        df_m = pd.DataFrame(all_metrics)
-        ws_metrics.update([df_m.columns.tolist()] + df_m.fillna('').values.tolist())
+        ws1 = sh.sheet1
+        ws1.update_title("metrics")
+        df1 = pd.DataFrame(metrics_rows)
+        ws1.update([df1.columns.tolist()] + df1.fillna("").astype(str).values.tolist())
 
-        # Diagnostics
-        ws_diag = sh.add_worksheet(title='Diagnostics', rows=100, cols=20)
-        df_d = pd.DataFrame(diagnostics)
-        ws_diag.update([df_d.columns.tolist()] + df_d.fillna('').values.tolist())
+        ws2 = sh.add_worksheet(title="diagnostics", rows=200, cols=50)
+        df2 = pd.DataFrame(diagnostics_rows)
+        ws2.update([df2.columns.tolist()] + df2.fillna("").astype(str).values.tolist())
 
-        # Slopes
-        ws_slopes = sh.add_worksheet(title='Slopes', rows=50, cols=15)
-        df_s = pd.DataFrame(slopes)
-        ws_slopes.update([df_s.columns.tolist()] + df_s.fillna('').values.tolist())
+        ws3 = sh.add_worksheet(title="slopes", rows=200, cols=50)
+        df3 = pd.DataFrame(slopes_rows)
+        ws3.update([df3.columns.tolist()] + df3.fillna("").astype(str).values.tolist())
 
-        url = sh.url
-        logger.info(f"Export Google Sheets: {url}")
-        return url
-
-    except Exception as e:
-        logger.error(f"Export Google Sheets echoue: {e}")
+        return sh.url
+    except Exception as exc:  # graceful by design
+        logger.error("Google Sheets export echoue: %s", exc)
         return None

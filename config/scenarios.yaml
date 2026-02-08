@@ -1,30 +1,36 @@
-scenarios:
+﻿scenarios:
 
   accelerated_pv:
-    name: "Accélération PV"
-    description: "Doublement capacité PV + BESS modéré"
+    name: "Acceleration PV"
+    description: "Ajout PV + BESS modere"
     params:
       delta_pv_gw: 20
       delta_bess_power_gw: 5
       delta_bess_energy_gwh: 20
 
   electrification:
-    name: "Électrification forte"
-    description: "Demande +15%, dont midday +8 GW (EVs, P2H)"
+    name: "Electrification forte"
+    description: "Demande +15%, dont hausse midi et soir"
     params:
       delta_demand_pct: 15
       delta_demand_midday_gw: 8
       delta_demand_evening_gw: 3
 
   high_co2:
-    name: "CO2 élevé"
-    description: "CO2 à 120 €/t → impact TCA et prix mécaniste"
+    name: "CO2 eleve"
+    description: "EUA constant a 120 EUR/t"
     params:
       co2_price_eur_t: 120
 
+  high_gas:
+    name: "Gaz eleve"
+    description: "TTF constant a 50 EUR/MWh_th"
+    params:
+      gas_price_eur_mwh: 50
+
   nuclear_reduction_fr:
-    name: "Réduction nucléaire FR"
-    description: "Must-run -10 GW + compensation PV/Wind"
+    name: "Reduction must-run FR"
+    description: "Must-run -10 GW, compensation PV/Wind"
     params:
       delta_must_run_gw: -10
       delta_pv_gw: 15
@@ -32,20 +38,16 @@ scenarios:
 
   flex_massive:
     name: "Flex massive"
-    description: "BESS +15 GW / 60 GWh"
+    description: "BESS +15 GW / 60 GWh + PSH +3 GW + exports +5GW"
     params:
       delta_bess_power_gw: 15
       delta_bess_energy_gwh: 60
-
-  high_gas:
-    name: "Gaz élevé"
-    description: "TTF à 50 €/MWh → impact TCA et prix mécaniste"
-    params:
-      gas_price_eur_mwh: 50
+      delta_psh_pump_gw: 3
+      delta_export_max_gw: 5
 
   combined_stress:
-    name: "Stress combiné"
-    description: "PV ×2 + demande stagnante + flex faible"
+    name: "Stress combine"
+    description: "PV x2 + demande stagnante + flex faible"
     params:
       delta_pv_gw: 25
       delta_demand_pct: 0
