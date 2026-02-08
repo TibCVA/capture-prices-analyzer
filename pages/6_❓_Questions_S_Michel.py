@@ -10,15 +10,13 @@ import streamlit as st
 
 from src.commentary_bridge import so_what_block
 from src.constants import (
-    COUNTRY_PALETTE,
     OUTLIER_YEARS,
-    PLOTLY_AXIS_DEFAULTS,
-    PLOTLY_LAYOUT_DEFAULTS,
 )
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
 from src.slope_analysis import compute_slope
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
+from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,
@@ -479,4 +477,3 @@ with tabs[5]:
             decision_use="Structurer la discussion sur le bon mix court-terme (BESS) vs longue duree (thermique).",
         )
     )
-

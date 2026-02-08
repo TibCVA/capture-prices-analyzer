@@ -17,12 +17,10 @@ from src.constants import (
     COL_SURPLUS,
     COL_SURPLUS_UNABS,
     COL_VRE,
-    PLOTLY_AXIS_DEFAULTS,
-    PLOTLY_LAYOUT_DEFAULTS,
-    REGIME_COLORS,
 )
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
 from src.ui_analysis import compute_nrl_price_link_stats
+from src.ui_theme import PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS, REGIME_COLORS
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,

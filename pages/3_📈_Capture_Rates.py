@@ -9,9 +9,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_bridge import comment_regression, so_what_block
-from src.constants import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.slope_analysis import compute_slope
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe, normalize_metrics_record
+from src.ui_theme import COUNTRY_PALETTE, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     challenge_block,
     dynamic_narrative,

@@ -11,14 +11,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_bridge import so_what_block
-from src.constants import (
-    COUNTRY_PALETTE,
-    PHASE_COLORS,
-    PLOTLY_AXIS_DEFAULTS,
-    PLOTLY_LAYOUT_DEFAULTS,
-)
 from src.export_utils import export_to_excel, export_to_gsheets
 from src.state_adapter import coerce_numeric_columns, ensure_plot_columns, metrics_to_dataframe
+from src.ui_theme import COUNTRY_PALETTE, PHASE_COLORS, PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     guard_no_data,
     inject_global_css,
@@ -232,4 +227,3 @@ with col2:
             st.success(f"Export cree: {url}")
         else:
             st.warning("Credentials absentes ou export indisponible.")
-

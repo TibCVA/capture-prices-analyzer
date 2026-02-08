@@ -9,10 +9,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.commentary_bridge import comment_scenario_delta, so_what_block
-from src.constants import PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.metrics import compute_annual_metrics
 from src.scenario_engine import apply_scenario
 from src.state_adapter import coerce_numeric_columns, metrics_to_dataframe, normalize_metrics_record
+from src.ui_theme import PLOTLY_AXIS_DEFAULTS, PLOTLY_LAYOUT_DEFAULTS
 from src.ui_helpers import (
     challenge_block,
     guard_no_data,

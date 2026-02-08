@@ -7,12 +7,17 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from src.constants import (
-    COHERENCE_STATUS_THRESHOLDS,
-    COL_NRL,
-    COL_PRICE_DA,
-    CORRELATION_STATUS_THRESHOLDS,
-)
+from src.constants import COL_NRL, COL_PRICE_DA
+
+try:
+    from src.constants import COHERENCE_STATUS_THRESHOLDS as _COH
+except Exception:
+    _COH = {"weak": 0.55, "medium": 0.70}
+
+try:
+    from src.constants import CORRELATION_STATUS_THRESHOLDS as _CORR
+except Exception:
+    _CORR = {"weak": 0.20, "medium": 0.45}
 
 
 def _get_metric(metrics_row: Mapping | pd.Series | None, key: str) -> float:
@@ -30,9 +35,9 @@ def _classify_correlation(r: float) -> str:
     if not np.isfinite(r):
         return "unknown"
     a = abs(float(r))
-    if a < CORRELATION_STATUS_THRESHOLDS["weak"]:
+    if a < _CORR["weak"]:
         return "weak"
-    if a < CORRELATION_STATUS_THRESHOLDS["medium"]:
+    if a < _CORR["medium"]:
         return "medium"
     return "strong"
 
@@ -40,9 +45,9 @@ def _classify_correlation(r: float) -> str:
 def _classify_coherence(score: float) -> str:
     if not np.isfinite(score):
         return "unknown"
-    if score < COHERENCE_STATUS_THRESHOLDS["weak"]:
+    if score < _COH["weak"]:
         return "weak"
-    if score < COHERENCE_STATUS_THRESHOLDS["medium"]:
+    if score < _COH["medium"]:
         return "medium"
     return "strong"
 
@@ -94,4 +99,3 @@ def compute_nrl_price_link_stats(df_proc: pd.DataFrame, metrics_row: Mapping | p
         "corr_status": _classify_correlation(pearson_r),
         "coherence_status": _classify_coherence(regime_coherence),
     }
-
